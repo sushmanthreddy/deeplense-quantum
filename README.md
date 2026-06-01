@@ -17,6 +17,14 @@ Gravitational lensing physics is invariant under the dihedral group `D4 = p4m po
 
 A trainable quantum convolutional network then acts as a symmetry-preserving quantum representation layer on top of the equivariant classical features.
 
+## Dataset
+
+The model is trained on three-class strong-lensing images: `no` (no substructure), `sphere` (subhalo / CDM-like), and `vort` (vortex / axion-like) substructure.
+
+![Sample strong-lensing images per class](assets/figures/sample_lensing_images.png)
+
+![Class distribution per split](assets/figures/class_distribution.png)
+
 ## Model
 
 **D4-Equivariant CNN (`e2cnn FlipRot2dOnR2`) + Strict p4m QCNN**
@@ -41,11 +49,39 @@ Evaluated on a held-out test set of 750 samples.
 | Total trainable parameters | 172,379 |
 | Trainable quantum parameters | 24 |
 
+### Training curves
+
+![Strict p4m hybrid training curves](assets/figures/training_curves.png)
+
+### Confusion matrix
+
+![Confusion matrix at 95.60% test accuracy](assets/figures/confusion_matrix.png)
+
+### ROC curves
+
+![Per-class and micro-average ROC curves](assets/figures/roc_curves.png)
+
 ## Key Findings
 
 - The Strict p4m model reaches **95.60% test accuracy** with only 172,379 total parameters (24 trainable quantum parameters) and provable end-to-end p4m equivariance — encoding the right inductive bias matters more than model size or ImageNet pretraining.
 - Because equivariance is built in rather than learned from augmentation, the model is a strong starting point for studies that need mathematical symmetry guarantees, e.g. out-of-distribution rotated/reflected test sets and few-shot transfer to new lensing datasets.
 - The notebook ships with extensive **QuTiP visualizations** (Bloch spheres with confidence colorbar, layer-wise Bloch animations following the QuTiP `bloch-sphere-animation` tutorial, Hinton diagrams of the reduced density matrix per class, Qubism plots of the 8-qubit pure state, computational-basis probability distributions, per-layer D₄-orbit graphs, and full circuit diagrams), making the model highly interpretable.
+
+## Equivariance Verification
+
+Every D₄ generator is tested empirically: feeding a rotated/reflected input and comparing the resulting per-qubit Bloch vectors against the group-transformed reference. The agreement is near-exact (mean `‖Δ‖ ≈ 0.043`), confirming the circuit is p4m-equivariant by construction.
+
+![D4-equivariance check on the Bloch sphere](assets/figures/d4_equivariance_check.png)
+
+## Interpretability
+
+The output qubit's reduced density matrix separates cleanly by class (Hinton diagrams), and the layer-wise Bloch trajectories show how each of the 6 QCNN layers steers the output qubit toward a class-dependent state.
+
+![Hinton diagrams of the output-qubit density matrix per class](assets/figures/hinton_density_matrix.png)
+
+![Layer-wise Bloch trajectories of the output qubit](assets/figures/bloch_layerwise_trajectories.png)
+
+![All 8 qubits of the QCNN output state](assets/figures/bloch_8qubit_output.png)
 
 ## Notebooks
 
@@ -55,6 +91,9 @@ Evaluated on a held-out test set of 750 samples.
 ## Repository Structure
 
 ```text
+assets/
+  figures/                       # figures exported from the notebook (used in this README)
+
 checkpoints/
   equivariant/
     best_strict_p4m_qcnn.pth
