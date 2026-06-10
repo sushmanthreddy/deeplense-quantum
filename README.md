@@ -27,7 +27,7 @@ The models are trained and evaluated on the **DeepLense Model_I** three-class st
 
 ## Models
 
-All three models share the same low-level quantum primitives (`RY` angle encoding, `IsingZZ = CNOT·RZ·CNOT`, `IsingYY`, and `MeasureAll(PauliZ)`). They differ in **how the symmetry is built into the circuit** — which single-qubit rotations are allowed, whether pooling is used, and where invariance is achieved.
+The models share the same low-level quantum primitives (angle / amplitude encoding, `IsingZZ = CNOT·RZ·CNOT`, `IsingYY`, and `MeasureAll(PauliZ)`). They differ in **how the symmetry is built into the circuit** — which single-qubit rotations are allowed, whether pooling is used, and where invariance is achieved. The first four are the primary models; the fifth (`eqnn_hep_torchquantum`) is an ablation study.
 
 **1. `equiv_qnn` — angle-encoded Equivariant QCNN (baseline)**
 - Classical CNN front-end reduces the image to 8 features, angle-encoded on 8 qubits.
@@ -104,7 +104,7 @@ To test whether the equivariant **quantum** circuit is doing real work — or wh
 
 **Ablation takeaway:** there is **no quantum advantage** on this task — at every fair comparison a classical alternative matches or beats the quantum core. However, the quantum core is **not inert**: the earlier "it does nothing" is an artifact of an over-capable encoder, and once that confound is removed the equivariant filters extract real, nonlinear, class-relevant structure (+30 pts). *Caveat:* the classical mixer (264 params) is not budget-matched to the quantum core (33 params), so the −5.3-pt gap is partly capacity, not purely quantum-vs-classical.
 
-The figures below are exported from the `strict_p4m_qcnn` notebook (the most extensively visualized / interpretable model).
+The figures below are exported from the `strict_p4m_qcnn` notebook.
 
 ### Training curves
 
@@ -112,7 +112,7 @@ The figures below are exported from the `strict_p4m_qcnn` notebook (the most ext
 
 ### Confusion matrix
 
-![Confusion matrix at 95.60% test accuracy](assets/figures/confusion_matrix.png)
+![Confusion matrix at 96.28% test accuracy](assets/figures/confusion_matrix.png)
 
 ### ROC curves
 
@@ -125,30 +125,13 @@ The figures below are exported from the `strict_p4m_qcnn` notebook (the most ext
 - `no_sub` is the easiest class for every model (≈ 99% per-class accuracy); the `axion` vs. `cdm` distinction is consistently the hardest.
 - **Ablation finding (`eqnn_hep_torchquantum`):** a controlled ablation shows **no quantum advantage** on this task — a classical alternative matches or beats the equivariant quantum core at every fair comparison (82% vs 82% with a trainable encoder; 75% vs 70% with a frozen encoder). The quantum core is not useless, though: with the classical encoder frozen it still learns **+30 pts over a 0-parameter baseline** with no barren plateau. The high accuracies of the four primary models are therefore best read as *equivariance + a strong classical front-end*, with the quantum layer providing inductive-bias / interpretability value rather than a measurable accuracy edge here.
 - Because equivariance is built in rather than learned from augmentation, these models are strong starting points for studies that need mathematical symmetry guarantees, e.g. out-of-distribution rotated/reflected test sets and few-shot transfer to new lensing datasets.
-- The `strict_p4m_qcnn` notebook ships with extensive **QuTiP visualizations** (Bloch spheres with confidence colorbar, layer-wise Bloch animations following the QuTiP `bloch-sphere-animation` tutorial, Hinton diagrams of the reduced density matrix per class, Qubism plots of the 8-qubit pure state, computational-basis probability distributions, per-layer D₄-orbit graphs, and full circuit diagrams), making the model highly interpretable.
-
-## Equivariance Verification
-
-Every D₄ generator is tested empirically: feeding a rotated/reflected input and comparing the resulting per-qubit Bloch vectors against the group-transformed reference. The agreement is near-exact (mean `‖Δ‖ ≈ 0.043`), confirming the circuit is p4m-equivariant by construction.
-
-![D4-equivariance check on the Bloch sphere](assets/figures/d4_equivariance_check.png)
-
-## Interpretability
-
-The output qubit's reduced density matrix separates cleanly by class (Hinton diagrams), and the layer-wise Bloch trajectories show how each of the 6 QCNN layers steers the output qubit toward a class-dependent state.
-
-![Hinton diagrams of the output-qubit density matrix per class](assets/figures/hinton_density_matrix.png)
-
-![Layer-wise Bloch trajectories of the output qubit](assets/figures/bloch_layerwise_trajectories.png)
-
-![All 8 qubits of the QCNN output state](assets/figures/bloch_8qubit_output.png)
 
 ## Notebooks
 
 Each architecture has a per-dataset run notebook under `notebooks/equivariant/<arch>/model_<i>.ipynb` (the results above are from `model_1`, the DeepLense Model_I dataset).
 
 - [`notebooks/equivariant/equiqnn/model_1.ipynb`](notebooks/equivariant/equiqnn/model_1.ipynb) — CNN front-end + angle-encoded Equivariant QCNN (conv/pool `8→4→2→1`); best accuracy/F1 (98.69% / 0.9869).
-- [`notebooks/equivariant/strict_p4m_qcnn/model_1.ipynb`](notebooks/equivariant/strict_p4m_qcnn/model_1.ipynb) — D4-equivariant CNN + Strict p4m QCNN on the regular representation (96.28%), including an explicit empirical equivariance test of every D₄ generator and extensive QuTiP visualizations.
+- [`notebooks/equivariant/strict_p4m_qcnn/model_1.ipynb`](notebooks/equivariant/strict_p4m_qcnn/model_1.ipynb) — D4-equivariant CNN + Strict p4m QCNN on the regular representation (96.28%).
 - [`notebooks/equivariant/fully_equivariant_p4m_qcnn_v2/model_1.ipynb`](notebooks/equivariant/fully_equivariant_p4m_qcnn_v2/model_1.ipynb) — Fully p4m-equivariant hybrid with the paper CAA EquivQCNN (twirled `U2`/`U4` filters, invariant measurement); best ROC AUC (0.9964).
 - [`notebooks/equivariant/etn_qvit_hybrid/model_1.ipynb`](notebooks/equivariant/etn_qvit_hybrid/model_1.ipynb) — Equivariant Transformer Network canonicalizer + orthogonal patch-wise Quantum ViT for continuous rotation + scale invariance (95.44%).
 - [`notebooks/equivariant/eqnn_hep_torchquantum/model_1.ipynb`](notebooks/equivariant/eqnn_hep_torchquantum/model_1.ipynb) — EQNN-for-HEP equivariant QCNN (twirled `U2`/`U4` filters, equivariant amplitude embedding) ported to TorchQuantum, with a controlled trainable-vs-frozen-encoder ablation isolating the quantum core's contribution (81.87% hybrid; quantum core +30 pts over baseline when the encoder is frozen, but no net quantum advantage).
@@ -160,7 +143,6 @@ Each architecture has a per-dataset run notebook under `notebooks/equivariant/<a
 - PyTorch
 - **TorchQuantum** — GPU-native PyTorch-autograd quantum simulator (batched 8-qubit circuits, end-to-end gradient flow with `loss.backward()`)
 - **e2cnn** — group-equivariant steerable CNNs (`FlipRot2dOnR2` for D₄ / p4m)
-- **QuTiP** (with optional `qutip-qip`) — Bloch sphere visualizations, Hinton diagrams, Qubism plots, and circuit rendering
 - Scikit-learn metrics
 - Jupyter notebooks
 - Git LFS for model checkpoints
