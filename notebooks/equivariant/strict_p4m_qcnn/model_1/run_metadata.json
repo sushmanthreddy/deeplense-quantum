@@ -1,0 +1,43 @@
+{
+  "notebook_name": "strict_p4m_qcnn",
+  "dataset_id": "model_1",
+  "data_root": "/home/jovyan/ssh-test-datavol-1/dataset/Model_I",
+  "test_dir": "/home/jovyan/ssh-test-datavol-1/dataset/Model_I_test",
+  "val_split": 0.2,
+  "run_dir": "/home/jovyan/ssh-test-datavol-1/deeplense-quantum/notebooks/equivariant/strict_p4m_qcnn/model_1",
+  "results_dir": "/home/jovyan/ssh-test-datavol-1/deeplense-quantum/notebooks/equivariant/strict_p4m_qcnn/model_1/results",
+  "checkpoint_path": "/home/jovyan/ssh-test-datavol-1/deeplense-quantum/notebooks/equivariant/strict_p4m_qcnn/model_1/checkpoints/best_strict_p4m_qcnn_model_1.pth",
+  "config": {
+    "seed": 42,
+    "resize_to": 150,
+    "in_channels": 3,
+    "imagenet_mean": [
+      0.485,
+      0.456,
+      0.406
+    ],
+    "imagenet_std": [
+      0.229,
+      0.224,
+      0.225
+    ],
+    "batch_size": 64,
+    "val_split": 0.2,
+    "use_augmentation": true,
+    "cache_data_in_memory": true,
+    "num_workers": 4,
+    "prefetch_factor": 4,
+    "pin_memory": true,
+    "class_names": null,
+    "n_qubits": 8,
+    "num_classes": 3,
+    "base_channels": 8,
+    "dropout_rate": 0.3,
+    "lr": 0.001,
+    "weight_decay": 1e-05,
+    "num_epochs": 50,
+    "patience": 12,
+    "warmup_epochs": 5,
+    "grad_clip": 1.0
+  }
+}
