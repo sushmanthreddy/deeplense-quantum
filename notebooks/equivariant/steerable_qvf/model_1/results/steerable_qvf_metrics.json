@@ -1,11 +1,11 @@
 {
-  "test_acc": 0.9846,
-  "macro_auc": 0.99895371,
-  "macro_f1": 0.9845826349518502,
-  "best_val_acc": 0.9828039305301646,
-  "total_params": 9892613,
-  "encoder_params": 8906800,
-  "quantum_params": 66,
+  "test_acc": 0.9836,
+  "macro_auc": 0.99893302,
+  "macro_f1": 0.983589750769884,
+  "best_val_acc": 0.9833752285191956,
+  "total_params": 9923540,
+  "encoder_params": 8937760,
+  "quantum_params": 33,
   "head_params": 1667,
   "group": "C4",
   "classes": [
