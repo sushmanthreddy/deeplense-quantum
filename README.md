@@ -1,98 +1,151 @@
-# Equivariant Quantum-Classical Networks for Dark Matter Substructure Classification
+# Quantum Visual Fields for Dark Matter Substructure Classification
 
-This project studies a **symmetry-aware hybrid quantum-classical network** for classifying dark matter substructure in strong gravitational lensing images. Strong lensing images contain subtle signatures that help distinguish between competing dark matter models, including Cold Dark Matter, Axion/Fuzzy Dark Matter, and no-substructure cases.
+This project studies **Quantum Visual Fields (QVF)** — a symmetry-aware hybrid quantum-classical network for classifying dark matter substructure in strong gravitational lensing images. Lensing images carry subtle signatures that distinguish competing dark matter models: Cold Dark Matter, Axion / Fuzzy Dark Matter, and no-substructure cases.
 
-Rather than relying on large pretrained backbones and data augmentation, the models encode the rotational and reflectional symmetries of lensing physics **directly into the architecture** — both in the classical feature extractor and in the quantum circuit. The result is a family of compact, physics-aware models whose predictions are invariant under 90° rotations and reflections by construction.
+Instead of leaning on large pretrained backbones and heavy augmentation, QVF encodes the rotational and reflectional symmetries of lensing physics **directly into the architecture** — in both the classical feature extractor and the quantum circuit. The result is one compact model whose predictions are invariant under 90° rotations and reflections by construction.
 
-This work is ongoing and is the active research focus of the project. So far it explores **five different quantum architectures** for the same 3-class task (each differing in how the symmetry is encoded at the circuit level) — three discrete-D₄ models, a continuous-symmetry ETN + Quantum ViT hybrid, and a faithful port of the EQNN-for-HEP equivariant QCNN — with multi-dataset extensions in progress.
+The key idea is a single shared design: one steerable-CNN front-end and one p4m equivariant quantum circuit, with **three switchable *neural* encodings** that decide how the image is loaded onto the qubits — neural **amplitude**, neural **angle**, and neural **data re-uploading**. Because the backbone and circuit are identical across all three, the comparison isolates exactly one thing: how you load the data into the register.
 
 ## Project Description
 
-Strong gravitational lensing is a powerful probe of dark matter and large-scale structure. The visual morphology of lensing images can encode small perturbations caused by dark matter substructure, but these signals are often subtle and high-dimensional.
+Strong gravitational lensing is a powerful probe of dark matter and large-scale structure. The visual morphology of a lensing image encodes small perturbations caused by dark matter substructure, but the signal is faint and high-dimensional.
 
-Gravitational lensing physics is invariant under the dihedral group `D4 = p4m point group` (rotations by 90° and reflections). Standard CNNs and pretrained ImageNet backbones only learn this property from data augmentation, which burns model capacity on a symmetry that can instead be encoded structurally. This project replaces:
+A lensing image has no preferred orientation: rotating or mirroring it does not change its class. Formally the label is invariant under the dihedral group `D4 = p4m point group` (90° rotations and reflections). Standard CNNs and ImageNet backbones only learn this from augmentation, which spends model capacity on a symmetry we can instead build in. QVF replaces:
 
-- the classical backbone with an `e2cnn` **D₄ group-equivariant CNN**, and
-- the generic variational quantum circuit (VQC) with a quantum circuit whose gates and parameter-sharing pattern make every layer commute with every group element of D₄.
-
-A trainable quantum convolutional network then acts as a symmetry-preserving quantum representation layer on top of the equivariant classical features.
+- the classical backbone with an `e2cnn` group-equivariant steerable CNN (`C8` / `D8`), and
+- the generic variational quantum circuit with a quantum circuit whose gates and parameter-sharing pattern make every layer commute with every element of the p4m group.
 
 ## Dataset
 
-The models are trained and evaluated on the **DeepLense Model_I** three-class strong-lensing dataset (150×150 images): `no_sub` (no substructure), `cdm` (subhalo / CDM-like), and `axion` (vortex / axion-like) substructure. The training split has 70,021 images and the held-out test split has 15,000 images (5,000 per class).
+Trained and evaluated on the **DeepLense Model_I** three-class strong-lensing dataset (150×150 images): `no_sub` (no substructure), `cdm` (subhalo / CDM-like), and `axion` (vortex / axion-like). The training split has 70,021 images and the held-out test split has 15,000 images (5,000 per class).
 
-![Sample strong-lensing images per class](assets/figures/sample_lensing_images.png)
+The figure below shows four random samples from each of the three classes — `no_sub` (top row, smooth Einstein rings), `cdm` / sphere (middle, ring + a compact subhalo), and `axion` / vort (bottom, vortex-perturbed arcs). The differences are subtle and the rings appear at arbitrary orientations, which is exactly why an orientation-invariant model helps.
+
+![Four sample strong-lensing images per class: no_sub (top), cdm/sphere (middle), axion/vort (bottom)](assets/figures/sample_lensing_images.png)
 
 ![Class distribution per split](assets/figures/class_distribution.png)
 
-## Models
+## Methodology
 
-The models share the same low-level quantum primitives (angle / amplitude encoding, `IsingZZ = CNOT·RZ·CNOT`, `IsingYY`, and `MeasureAll(PauliZ)`). They differ in **how the symmetry is built into the circuit** — which single-qubit rotations are allowed, whether pooling is used, and where invariance is achieved. The first four are the primary models; the fifth (`eqnn_hep_torchquantum`) is an ablation study.
+The whole model is a single forward pass. We hold the backbone and the circuit fixed and only swap the encoding block, so any difference in the numbers comes from the encoding alone.
 
-**1. `equiv_qnn` — angle-encoded Equivariant QCNN (baseline)**
-- Classical CNN front-end reduces the image to 8 features, angle-encoded on 8 qubits.
-- Quantum core: 3 conv + 3 pool blocks (a classic QCNN), pooling the active qubits `8 → 4 → 2 → 1` via controlled-RX gates.
-- 2-qubit conv block uses **independent** RX angles on each wire (6 params); **33 trainable quantum parameters**.
-- Symmetry is approximate (free single-qubit rotations + directional pooling).
+```mermaid
+flowchart LR
+    A["Lensing image<br/>1 x 150 x 150"] --> B["Steerable CNN<br/>(e2cnn, C8 / D8)<br/>equivariant features"]
+    B --> C["GroupPooling +<br/>global avg pool<br/>→ invariant vector"]
+    C --> D{"Neural<br/>ENCODING<br/>(one switch)"}
+    D --> E["p4m Equivariant QCNN<br/>8 qubits · 33 params<br/>conv / pool / H"]
+    E --> F["Multi-observable readout<br/>⟨Z⟩,⟨X⟩,⟨Y⟩ + ⟨ZZ⟩<br/>→ 32 features"]
+    F --> G["Head<br/>Linear→ReLU→Dropout→Linear"]
+    G --> H["3 classes<br/>axion / cdm / no_sub"]
 
-**2. `strict_p4m_qcnn` — strict-D4 QCNN on the regular representation**
-- Classical backbone: D4 steerable CNN (`FlipRot2dOnR2(N=4)`) + equivariant 1×1 conv + spatial average pooling to 8 channels.
-- Quantum core: 8 qubits (`|D4| = 8`, one qubit per group element). 6 layers of SWAP-symmetric U₂ blocks with **tied** RX parameters, edges grouped by D₄-orbits with parameter sharing per orbit, **no pooling**, and a D₄-orbit polynomial-invariant readout.
-- Strictly p4m by construction; **24 trainable quantum parameters**, 172,379 total.
+    classDef classical fill:#cfe8ff,stroke:#1f6feb,color:#000;
+    classDef bridge fill:#c9f2ea,stroke:#0a8f7f,color:#000;
+    classDef quantum fill:#e7d6ff,stroke:#7b3ff2,color:#000;
+    class A,B,C classical;
+    class D bridge;
+    class E,F quantum;
+    class G,H classical;
+```
 
-**3. `fully_equivariant_p4m_qcnn_v2` — paper CAA EquivQCNN (best ROC AUC)**
-- Follows Chang et al. (arXiv:2310.02323).
-- Coordinate-Aware Amplitude (CAA) embedding: qubits split into an x-register and a y-register (4 + 4).
-- Twirled filters `U2` (within a register) and a 4-body `U4` (links the two registers); **no single-qubit rotations** in the filters. Invariance is built into the measurement (`Rz(φ)+H` + averaging register partners).
-- Provably p4m-equivariant; commutes with the induced representations `V_x, V_y, V_r`.
+Blue = classical equivariant CNN · teal = the encoding bridge · purple = the quantum circuit. The three encodings (below) plug into the same `D` slot.
 
-**4. `etn_qvit_hybrid` — Equivariant Transformer Network + Quantum ViT (continuous symmetry)**
-- Moves beyond discrete 90° symmetry: an Equivariant Transformer Network (ETN) canonicalizer (`Rotation`/`Scale`/`RotationScale` transformers, log-polar coordinates) first aligns each image, giving continuous rotation + scale invariance.
-- Quantum core: an orthogonal patch-wise Quantum Vision Transformer on `8 tokens × 2 dim = 16 qubits` — unary `vector_loader` amplitude encoding, trainable butterfly orthogonal layers (parameter-shared = self-attention), and a cross-token RBS-gate cascade for patch mixing.
-- 89,991 total trainable parameters.
+```mermaid
+flowchart TD
+    V["invariant vector"] --> S{ENCODING}
+    S -->|amplitude| A1["MLP → 256 logits<br/>softmax → sqrt<br/>= valid 8-qubit statevector"]
+    S -->|angle| A2["MLP → 8 values<br/>tanh · π/2<br/>= one RY per qubit"]
+    S -->|reupload| A3["8 angles re-injected<br/>L = 2 times<br/>between circuit blocks"]
+    A1 --> Q["same 33-param<br/>p4m QCNN"]
+    A2 --> Q
+    A3 --> Q
 
-**5. `eqnn_hep_torchquantum` — EQNN-for-HEP equivariant QCNN, ported to TorchQuantum (ablation study)**
-- A faithful TorchQuantum port of the [EQNN_for_HEP](https://github.com/ML4SCI/EQNN_for_HEP) `Equivariant_QCNN` (Hur/Park-style p4m EQCNN, originally for 16×16 HEP calorimeter images): equivariant amplitude embedding (`sin(π/2·(2p−1))` pixel map → 256 amplitudes on 8 qubits), twirled equivariant `U2`/`U4` filters (single-qubit `RX` + pairwise `IsingZZ`/`IsingYY` + global `Z⊗Z⊗Z⊗Z` phase, parameters tied per D₄-orbit), and equivariant pooling — the `p4m_QCNN_structure` connectivity, **33 trainable quantum parameters**.
-- Adapted to faint 3-class lensing by adding a small learnable classical amplitude encoder (D₄-friendly avg-pool to 16×16 + a tiny CNN) and a full 8-qubit `⟨Z⟩` readout. The quantum filters remain provably p4m-equivariant.
-- Primarily an **ablation study**: it isolates how much the equivariant quantum core actually contributes versus the classical front-end (see the dedicated ablation results below). The pure HEP-style block (global amplitude embedding + single-qubit readout) does **not** learn this faint data unaided — it sits at chance due to a barren plateau and a near-constant readout.
+    classDef bridge fill:#c9f2ea,stroke:#0a8f7f,color:#000;
+    classDef quantum fill:#e7d6ff,stroke:#7b3ff2,color:#000;
+    class V,S,A1,A2,A3 bridge;
+    class Q quantum;
+```
+
+### 1. From the image to a symmetry-invariant vector
+
+The front-end is a steerable CNN built with `e2cnn` (`R2Conv` + `InnerBatchNorm` + ReLU + antialiased pooling), following the GSoC-23 `C8SteerableCNN` design, on the rotation group `C8` (or `D8` once mirrors are switched on). A final `GroupPooling` collapses each regular-representation field to a scalar, and a global average pool turns the feature map into one compact vector that is invariant under 90° rotations and reflections. This single invariant vector is the input every encoding sees, which is what makes the three-way comparison fair.
+
+### 2. The encoding block (the only thing that changes)
+
+"Neural" here means a small trainable network produces the numbers we load onto the qubits, rather than reading raw pixels. This keeps faint lensing arcs from being washed out and guarantees the qubit state is always valid.
+
+- **Neural amplitude (the QVF encoding).** A linear layer maps the invariant vector to 256 logits. We pass those through a softmax to get a probability vector that sums to 1, then take the element-wise square root. The result is a length-256 real vector with unit L2 norm, which is exactly a valid 8-qubit statevector (`||a||₂ = 1`), and we load it with amplitude embedding. This uses the full `2⁸ = 256`-dimensional Hilbert space, so it is the most expressive encoding, but squeezing everything through 256 tied amplitudes also makes it the hardest to optimise, which is why its accuracy comes in lowest of the three.
+- **Neural angle.** The network outputs 8 numbers, each bounded with `tanh·(π/2)` and applied as a single `RY` rotation on its qubit. Smooth, stable, easiest to train, and the best performer.
+- **Neural re-uploading.** The same 8 angles are re-injected `L` times (here `L = 2`) between circuit blocks, giving the quantum part more work to do and more expressivity.
+
+### 3. The equivariant quantum circuit
+
+The circuit is a faithful TorchQuantum port of the EQNN-for-HEP p4m equivariant QCNN. It runs on 8 qubits with only **33 trainable parameters**, weight-tied across the p4m orbits so the whole circuit commutes with 90° rotations and reflections by construction. It is a standard convolution/pooling QCNN:
+
+- **Equivariant convolution `U2` (6 params):** `RX, RX, IsingZZ, RX, RX, IsingYY`.
+- **Equivariant pooling (5 params):** `RX, RX, RY, RZ, CRX`.
+
+The active qubits are halved at each pooling step until one is left, just like a classical conv/pool stack:
+
+```mermaid
+flowchart LR
+    Q8["8 qubits"] -->|conv1<br/>6 params| C1["8 qubits"]
+    C1 -->|pool1| Q4["4 qubits"]
+    Q4 -->|conv2<br/>6 params| C2["4 qubits"]
+    C2 -->|pool2| Q2["2 qubits"]
+    Q2 -->|conv3<br/>6 params| C3["2 qubits"]
+    C3 -->|pool3| Q1["1 qubit"]
+    Q1 -->|H| R["readout"]
+
+    classDef quantum fill:#e7d6ff,stroke:#7b3ff2,color:#000;
+    class Q8,C1,Q4,C2,Q2,C3,Q1,R quantum;
+```
+
+`IsingZZ` and `IsingYY` are built from native `CNOT·RZ·CNOT` (with `RX(±π/2)` basis changes for `YY`), and we checked that they match the PennyLane originals bit-for-bit. Everything is expressed with batched `rx/ry/rz/cnot/crx` gates so the circuit trains end-to-end on GPU with autograd.
+
+The figure below is the full trained circuit drawn from the notebook: the 8 horizontal wires are the qubits, and reading left to right you can see conv1 over all 8 wires, then pool1 dropping to 4 active wires, conv2, pool2, conv3, pool3, the final Hadamard, and the measurement boxes on the right. The repeated `RX`/`IsingZZ`/`IsingYY` blocks with shared angles are the 33 weight-tied parameters that make the circuit p4m-equivariant.
+
+![Full trained p4m equivariant QCNN circuit on 8 qubits: conv1 → pool1 → conv2 → pool2 → conv3 → pool3 → H → measurement, with 33 weight-tied parameters](assets/figures/equivqcnn_trained_circuit.png)
+
+### 4. Readout and head
+
+Reading only `⟨Z⟩` on the 8 wires turned out to be a bottleneck: 8 numbers were too few and the loss got stuck near `ln(3)`. So we widen the readout to `⟨Z⟩, ⟨X⟩, ⟨Y⟩` per wire (24 features) plus `⟨Zᵢ Zⱼ⟩` on the conv1 orbit pairs (8 more), for 32 features in total. The `⟨X⟩`/`⟨Y⟩` terms come from a basis change (`H` / `RX(π/2)`) before measuring `Z`, and the `⟨ZZ⟩` terms come straight from `|ψ|²`, so they are all read off the same final state. A flag-gated hybrid residual can also concatenate the invariant CNN vector (projected to 16 dims) into the head, which lets us report both a pure-quantum-readout number and a hybrid number. The classifier head is `Linear → ReLU → Dropout(0.2) → Linear → 3 classes`.
 
 ## Results
 
-Evaluated on the held-out **DeepLense Model_I** test set (15,000 samples, 3 balanced classes: `axion`, `cdm`, `no_sub`; 150×150 images).
+All three QVF variants share the **same** steerable-CNN front-end and the **same** 33-parameter p4m equivariant QCNN — only the neural encoding differs — so this is a controlled comparison of how to load a lensing image into the qubit register. Evaluated on the held-out **DeepLense Model_I** test set (15,000 samples, 3 balanced classes: `axion`, `cdm`, `no_sub`).
 
-| Architecture | Test Acc | Macro F1 | Test ROC AUC | Params |
-| --- | ---: | ---: | ---: | ---: |
-| `equiqnn` (angle-encoded QCNN) | **98.69%** | **0.9869** | 0.9991 | 33 quantum / 8.91M total |
-| `fully_equivariant_v2` (CAA + twirled) | 96.81% | 0.97 | **0.9964** | 4 × depth quantum |
-| `strict_p4m_qcnn` (regular rep, no pool) | 96.28% | 0.9627 | 0.9952 | 24 quantum |
-| `etn_qvit_hybrid` (ETN + Quantum ViT) | 95.44% | 0.9543 | 0.9943 | 89,991 total |
-| `eqnn_hep_torchquantum` (HEP EQCNN port, hybrid)¹ | 81.87% | 0.8156 | 0.9257 | 33 quantum / 2.7K total |
+| Encoding | Test Acc | Macro F1 | Test ROC AUC | Quantum params | Total params |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Neural angle (`tanh·π/2 → RY`) | **98.77%** | **0.9877** | **0.9991** | 33 | 8.91M |
+| Neural re-uploading (`L = 2`) | 98.46% | 0.9846 | 0.9990 | 66 | 9.89M |
+| Neural amplitude (`softmax → √`, QVF) | 95.46% | 0.9544 | 0.9948 | 33 | 9.92M |
 
-Per-class test accuracy is highest on `no_sub` across every model (≈ 99%), with the `axion` vs. `cdm` boundary being the hardest to separate — consistent with their subtler morphological differences.
+Per-class ROC AUC for the best (angle) variant: `axion` 0.9992 · `cdm` 0.9984 · `no_sub` 0.9998. As elsewhere, `no_sub` is the easiest class (≈ 99.9% recall) and the `axion` vs. `cdm` boundary is the hardest.
 
-¹ `eqnn_hep_torchquantum` is an **ablation study**, not a peer of the four models above. The HEP-style EQCNN was designed for 16×16 binary calorimeter images; on faint 3-class lensing the pure quantum block sits at chance, and the 81.87% comes from the hybrid (classical encoder + quantum core). The ablation below shows the classical encoder — not the quantum filters — drives that number. It is reported for completeness and as a negative/diagnostic result.
+**Takeaway:** the three encodings share the exact same backbone and circuit, so the gap between them is purely an encoding effect. Neural **angle** is the easiest to optimise and lands at the top (98.77%). Neural **amplitude** packs the whole invariant vector into a 256-amplitude state on 8 qubits, which is the most expressive but also the tightest bottleneck to train through; it comes in lower at **95.46%** but still well clear of chance, so the amplitude state is clearly carrying real class signal. **Re-uploading** sits between the two. In short, how you load the image into the register matters more than the circuit, which is identical in all three cases.
 
-**Key takeaway:** the four primary architectures all clear **95% test accuracy** on the full 15k-sample test set with very few quantum parameters. The angle-encoded QCNN (`equiqnn`) leads on raw accuracy/F1, while the strict paper-based p4m construction (`fully_equivariant_v2`) gives the best ROC AUC with only `4 × depth` quantum parameters — encoding the right inductive bias matters more than model size.
+## Is the quantum circuit actually learning? (ablation)
 
-### Ablation: does the quantum core actually contribute? (`eqnn_hep_torchquantum`)
+A fair question with any hybrid model is whether the quantum part is doing real work, or whether the classical encoder is quietly carrying the whole thing. We ran a controlled ablation in [`notebooks/equivariant/eqnn_hep_torchquantum/eqnn_hep_p4m_qcnn_lensing_ablation.ipynb`](notebooks/equivariant/eqnn_hep_torchquantum/eqnn_hep_p4m_qcnn_lensing_ablation.ipynb), which uses the same EQNN-for-HEP equivariant filters (`U2`/`U4` built from `RX` + `IsingZZ`/`IsingYY`, tied per p4m orbit) that the QVF circuit is built from.
 
-To test whether the equivariant **quantum** circuit is doing real work — or whether the classical front-end is carrying the model — the `eqnn_hep_torchquantum` notebook runs a controlled ablation. The encoder and classification head are held **byte-for-byte identical** across variants, and only the `256 → 8` core is swapped:
+The setup keeps the encoder and the classification head **byte-for-byte identical** and only swaps the `256 → 8` core. Same data, same epochs, same optimizer, same seed — so any gap is the core, not capacity or luck. Three cores are compared:
 
-- **quantum** — the equivariant HEP `U2`/`U4` core (~33 trainable params),
-- **fixed** — a parameter-free block-sum of the encoded amplitudes (0 trainable params; the encoder+head floor),
+- **quantum** — the equivariant QCNN (`U2`/`U4` + pooling), ~33 trainable params,
+- **fixed** — a parameter-free block-sum of the encoded amplitudes (0 params; the encoder + head floor),
 - **classical** — a small learnable low-rank linear mixer (~264 params).
 
-**Trainable encoder** (the encoder is free to learn — the deployed hybrid):
+**Run 1 — trainable encoder (the deployed hybrid).** The encoder is free to learn.
 
 | Core | Test Acc | Macro AUC | Macro F1 | Core params |
 | --- | ---: | ---: | ---: | ---: |
-| quantum | 81.87% | 0.9257 | 0.8156 | 33 |
-| fixed | 81.87% | 0.9232 | 0.8163 | 0 |
-| classical | 81.82% | 0.9177 | 0.8155 | 264 |
+| quantum | 81.87% | 0.9257 | 0.8155 | 33 |
+| fixed | 81.79% | 0.9230 | 0.8153 | 0 |
+| classical | 81.83% | 0.9177 | 0.8156 | 264 |
 
-→ With a capable learnable encoder, **all three cores tie at ~82%** — a 0-parameter reduction matches the quantum circuit exactly. The encoder separates the classes, so the core is irrelevant downstream; the quantum filters add **no measurable lift**.
+All three tie at ~82%. A 0-parameter reduction matches the quantum circuit exactly, which means the learnable encoder has already separated the classes and the core barely matters downstream. On its own this looks like "the circuit does nothing" — but that is an artifact of an over-capable encoder, so we remove that confound next.
 
-**Frozen encoder** (front-end fixed to the deterministic antisymmetric features, so the core is the *only* trainable mixer):
+**Run 2 — frozen encoder (the core is the *only* trainable mixer).** The front-end is frozen to a fixed, deterministic equivariant feature map, so the core has to extract the class signal itself.
 
 | Core | Test Acc | Macro AUC | Macro F1 | Trainable params |
 | --- | ---: | ---: | ---: | ---: |
@@ -100,58 +153,37 @@ To test whether the equivariant **quantum** circuit is doing real work — or wh
 | quantum | 69.72% | 0.8536 | 0.6872 | 60 |
 | fixed | 39.41% | 0.5601 | 0.3734 | 27 |
 
-→ When the core has to do the work, the equivariant quantum circuit **genuinely learns: +30.3 pts over the fixed floor** (39% → 70%), with no barren plateau. But a small classical mixer still edges it out by **+5.3 pts** (75% vs 70%).
+Now the circuit clearly comes alive: the equivariant quantum core jumps to **69.7%**, a **+30.3-point** lift over the 0-parameter floor (39.4%), and it trains smoothly with no barren plateau. So the equivariant filters genuinely learn real, nonlinear, class-relevant structure from the qubit state.
 
-**Ablation takeaway:** there is **no quantum advantage** on this task — at every fair comparison a classical alternative matches or beats the quantum core. However, the quantum core is **not inert**: the earlier "it does nothing" is an artifact of an over-capable encoder, and once that confound is removed the equivariant filters extract real, nonlinear, class-relevant structure (+30 pts). *Caveat:* the classical mixer (264 params) is not budget-matched to the quantum core (33 params), so the −5.3-pt gap is partly capacity, not purely quantum-vs-classical.
-
-The figures below are exported from the `strict_p4m_qcnn` notebook.
-
-### Training curves
-
-![Strict p4m hybrid training curves](assets/figures/training_curves.png)
-
-### Confusion matrix
-
-![Confusion matrix at 96.28% test accuracy](assets/figures/confusion_matrix.png)
-
-### ROC curves
-
-![Per-class and micro-average ROC curves](assets/figures/roc_curves.png)
-
-## Key Findings
-
-- The four primary quantum architectures exceed **95% test accuracy** on the full 15,000-sample 3-class test set with very few quantum parameters — encoding the right inductive bias matters more than model size or ImageNet pretraining.
-- The angle-encoded QCNN (`equiqnn`) leads on raw accuracy and macro-F1 (**98.69%** / **0.9869**), while the strict paper-based p4m model (`fully_equivariant_v2`) gives the best ROC AUC (**0.9964**) using only `4 × depth` quantum parameters. The strict regular-rep model (`strict_p4m_qcnn`) and the continuous-symmetry ETN + Quantum ViT hybrid (`etn_qvit_hybrid`) follow closely at 96.28% and 95.44%.
-- `no_sub` is the easiest class for every model (≈ 99% per-class accuracy); the `axion` vs. `cdm` distinction is consistently the hardest.
-- **Ablation finding (`eqnn_hep_torchquantum`):** a controlled ablation shows **no quantum advantage** on this task — a classical alternative matches or beats the equivariant quantum core at every fair comparison (82% vs 82% with a trainable encoder; 75% vs 70% with a frozen encoder). The quantum core is not useless, though: with the classical encoder frozen it still learns **+30 pts over a 0-parameter baseline** with no barren plateau. The high accuracies of the four primary models are therefore best read as *equivariance + a strong classical front-end*, with the quantum layer providing inductive-bias / interpretability value rather than a measurable accuracy edge here.
-- Because equivariance is built in rather than learned from augmentation, these models are strong starting points for studies that need mathematical symmetry guarantees, e.g. out-of-distribution rotated/reflected test sets and few-shot transfer to new lensing datasets.
+**What this tells us about the circuit.** The quantum core is not inert — once it is the thing doing the work, it learns +30 points over doing nothing. But there is **no quantum advantage** on this task: a small classical mixer still edges it out (75% vs 70%), and with a strong encoder everything ties. The honest reading of the high QVF accuracies above is therefore *equivariance + a strong classical front-end*, with the quantum layer contributing inductive bias and a learnable, symmetry-respecting representation rather than a measurable accuracy edge. (One caveat: the classical mixer has 264 params vs the quantum core's 33, so the −5-point gap is partly capacity, not purely quantum-vs-classical.)
 
 ## Notebooks
 
-Each architecture has a per-dataset run notebook under `notebooks/equivariant/<arch>/model_<i>.ipynb` (the results above are from `model_1`, the DeepLense Model_I dataset).
+One shared steerable-CNN + p4m EquivQCNN backbone, three switchable *neural* encodings (set via a single `ENCODING` switch in the config cell):
 
-- [`notebooks/equivariant/equiqnn/model_1.ipynb`](notebooks/equivariant/equiqnn/model_1.ipynb) — CNN front-end + angle-encoded Equivariant QCNN (conv/pool `8→4→2→1`); best accuracy/F1 (98.69% / 0.9869).
-- [`notebooks/equivariant/strict_p4m_qcnn/model_1.ipynb`](notebooks/equivariant/strict_p4m_qcnn/model_1.ipynb) — D4-equivariant CNN + Strict p4m QCNN on the regular representation (96.28%).
-- [`notebooks/equivariant/fully_equivariant_p4m_qcnn_v2/model_1.ipynb`](notebooks/equivariant/fully_equivariant_p4m_qcnn_v2/model_1.ipynb) — Fully p4m-equivariant hybrid with the paper CAA EquivQCNN (twirled `U2`/`U4` filters, invariant measurement); best ROC AUC (0.9964).
-- [`notebooks/equivariant/etn_qvit_hybrid/model_1.ipynb`](notebooks/equivariant/etn_qvit_hybrid/model_1.ipynb) — Equivariant Transformer Network canonicalizer + orthogonal patch-wise Quantum ViT for continuous rotation + scale invariance (95.44%).
-- [`notebooks/equivariant/eqnn_hep_torchquantum/model_1.ipynb`](notebooks/equivariant/eqnn_hep_torchquantum/model_1.ipynb) — EQNN-for-HEP equivariant QCNN (twirled `U2`/`U4` filters, equivariant amplitude embedding) ported to TorchQuantum, with a controlled trainable-vs-frozen-encoder ablation isolating the quantum core's contribution (81.87% hybrid; quantum core +30 pts over baseline when the encoder is frozen, but no net quantum advantage).
-- [`notebooks/amplitude_testing/datavisualization_amplitude.ipynb`](notebooks/amplitude_testing/datavisualization_amplitude.ipynb) — Data visualization and amplitude-encoding exploration for the lensing dataset.
+- [`notebooks/equivariant/steerable_qvf/angle.ipynb`](notebooks/equivariant/steerable_qvf/angle.ipynb) — neural angle encoding (`tanh·π/2 → RY`); best of the three (98.77% / 0.9877 / AUC 0.9991).
+- [`notebooks/equivariant/steerable_qvf/reupload.ipynb`](notebooks/equivariant/steerable_qvf/reupload.ipynb) — neural data re-uploading (`L = 2`, `33 × L` quantum params); 98.46%.
+- [`notebooks/equivariant/steerable_qvf/amplitude.ipynb`](notebooks/equivariant/steerable_qvf/amplitude.ipynb) — neural amplitude encoding (`softmax → √ → AmplitudeEmbedding`, full 8-qubit Hilbert space); 95.46%.
+
+Supporting analysis:
+
+- [`notebooks/equivariant/eqnn_hep_torchquantum/eqnn_hep_p4m_qcnn_lensing_ablation.ipynb`](notebooks/equivariant/eqnn_hep_torchquantum/eqnn_hep_p4m_qcnn_lensing_ablation.ipynb) — controlled trainable-vs-frozen-encoder ablation on the same equivariant `U2`/`U4` filters, isolating how much the quantum core actually learns (+30 pts over a 0-param baseline when the encoder is frozen; no net quantum advantage).
 
 ## Technologies Used
 
 - Python
 - PyTorch
 - **TorchQuantum** — GPU-native PyTorch-autograd quantum simulator (batched 8-qubit circuits, end-to-end gradient flow with `loss.backward()`)
-- **e2cnn** — group-equivariant steerable CNNs (`FlipRot2dOnR2` for D₄ / p4m)
+- **e2cnn** — group-equivariant steerable CNNs (`Rot2dOnR2` / `FlipRot2dOnR2` for `C8` / `D8`)
 - Scikit-learn metrics
 - Jupyter notebooks
 - Git LFS for model checkpoints
 
 ## Extension Direction
 
-The broader Quantum ML test and extension plan that originated this equivariant notebook lives here: [Specific Test III Quantum ML](https://github.com/sushmanthreddy/Task_2026/tree/main/Specific_Test_III_Quantum_ML).
+The broader Quantum ML test and extension plan that originated this work lives here: [Specific Test III Quantum ML](https://github.com/sushmanthreddy/Task_2026/tree/main/Specific_Test_III_Quantum_ML).
 
-The detailed project plan and upcoming implementation roadmap are tracked in this document: [GSoC 2026 project plan](https://docs.google.com/document/d/1weWicZdYN34_GT0637SVESl5sWR9RA6lcXsXWxuc5GA/edit?usp=sharing).
+The detailed project plan and upcoming implementation roadmap are tracked here: [GSoC 2026 project plan](https://docs.google.com/document/d/1weWicZdYN34_GT0637SVESl5sWR9RA6lcXsXWxuc5GA/edit?usp=sharing).
 
 ## Mentors
 
@@ -170,9 +202,8 @@ Difficulty: Advanced
 
 ## Future Work
 
-- **Cross-dataset benchmark** *(next)* — the per-architecture `model_1` … `model_4` notebooks are set up to run all quantum architectures across the four GSoC-2023 / DeepLense datasets (Model I 150×150 Gaussian PSF, Model II 64×64 Euclid-like, Model III 64×64 HST-like, Model IV multi-channel real galaxies), mirroring the 2023 equivariant-transformer protocol, to compare against the classical C8 baselines. Model_I results are reported above.
-- **C8 / continuous-rotation backbones + QCNN** — extend the D₄ ECNN front-end to `Rot2dOnR2(N=8)`, harmonic networks (continuous SO(2) equivariance), and equivariant wide ResNets.
-- **Quantum kernel methods** — replace the variational QCNN with a quantum kernel estimator on the equivariant features.
-- **Noise robustness under realistic NISQ conditions** — add depolarizing / amplitude-damping / phase-damping noise channels to the QCNN and evaluate degradation. TorchQuantum supports all of these natively.
-- **Hardware-aware simulations** — compile the strict p4m circuit to IBM / Google / IonQ native gate sets and re-run.
-- **Qubit-count and depth ablations** — re-train at 4, 8, 12, 16 qubits and 2, 4, 6, 8 conv layers to find the parameter / accuracy frontier of the equivariant QCNN.
+- **Cross-dataset benchmark** — run QVF across the four GSoC-2023 / DeepLense datasets (Model I 150×150 Gaussian PSF, Model II 64×64 Euclid-like, Model III 64×64 HST-like, Model IV multi-channel real galaxies), and compare against the classical `C8` steerable-CNN baselines.
+- **Continuous-rotation backbones** — extend the steerable front-end to harmonic networks (continuous `SO(2)` equivariance) and equivariant wide ResNets.
+- **Re-uploading depth sweep** — push `L` higher to map the expressivity / trainability trade-off of the angle encoding.
+- **Noise robustness under realistic NISQ conditions** — add depolarizing / amplitude-damping / phase-damping channels to the QCNN and evaluate degradation (TorchQuantum supports all natively).
+- **Hardware-aware simulations** — compile the p4m circuit to IBM / Google / IonQ native gate sets and re-run.
