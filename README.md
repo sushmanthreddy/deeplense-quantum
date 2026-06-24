@@ -89,17 +89,19 @@ The active qubits are halved at each pooling step until one is left, just like a
 
 ```mermaid
 flowchart LR
-    Q8["8 qubits"] -->|conv1<br/>6 params| C1["8 qubits"]
-    C1 -->|pool1| Q4["4 qubits"]
-    Q4 -->|conv2<br/>6 params| C2["4 qubits"]
-    C2 -->|pool2| Q2["2 qubits"]
-    Q2 -->|conv3<br/>6 params| C3["2 qubits"]
-    C3 -->|pool3| Q1["1 qubit"]
-    Q1 -->|H| R["readout"]
+    Q8["8 qubits"] -->|conv1<br/>6 params| C1["8 active"]
+    C1 -->|pool1| Q4["4 active"]
+    Q4 -->|conv2<br/>6 params| C2["4 active"]
+    C2 -->|pool2| Q2["2 active"]
+    Q2 -->|conv3<br/>6 params| C3["2 active"]
+    C3 -->|pool3 + H| Q1["1 active"]
+    Q1 -.->|state is still<br/>8 physical qubits| R["readout on ALL 8 wires<br/>⟨Z⟩,⟨X⟩,⟨Y⟩ (24) + ⟨ZZ⟩ (8)<br/>= 32 features"]
 
     classDef quantum fill:#e7d6ff,stroke:#7b3ff2,color:#000;
     class Q8,C1,Q4,C2,Q2,C3,Q1,R quantum;
 ```
+
+> The `8 → 4 → 2 → 1` count is the **logical** number of *active* wires the conv/pool gates operate on (the HEP-style QCNN structure). The state is always 8 physical qubits — pooling concentrates information onto fewer wires rather than deleting qubits — so at the end we read observables on **all 8 wires**, not just the single pooled qubit. The original HEP repo measured only that one centre qubit (fine for binary classification); for 3-class lensing we widen the readout to 32 features, because the 1-qubit (and even the 8-value `⟨Z⟩`-only) readout was a bottleneck that pinned the loss near `ln(3)`.
 
 `IsingZZ` and `IsingYY` are built from native `CNOT·RZ·CNOT` (with `RX(±π/2)` basis changes for `YY`), and we checked that they match the PennyLane originals bit-for-bit. Everything is expressed with batched `rx/ry/rz/cnot/crx` gates so the circuit trains end-to-end on GPU with autograd.
 
