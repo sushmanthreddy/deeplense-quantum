@@ -80,7 +80,7 @@ The front-end is a steerable CNN built with `e2cnn` (`R2Conv` + `InnerBatchNorm`
 
 ### 3. The equivariant quantum circuit
 
-The circuit is a faithful TorchQuantum port of the EQNN-for-HEP p4m equivariant QCNN. It runs on 8 qubits with only **33 trainable parameters**, weight-tied across the p4m orbits so the whole circuit commutes with 90° rotations and reflections by construction. It is a standard convolution/pooling QCNN:
+The circuit is a p4m equivariant QCNN implemented in TorchQuantum. It runs on 8 qubits with only **33 trainable parameters**, weight-tied across the p4m orbits so the whole circuit commutes with 90° rotations and reflections by construction. It is a standard convolution/pooling QCNN:
 
 - **Equivariant convolution `U2` (6 params):** `RX, RX, IsingZZ, RX, RX, IsingYY`.
 - **Equivariant pooling (5 params):** `RX, RX, RY, RZ, CRX`.
@@ -101,7 +101,7 @@ flowchart LR
     class Q8,C1,Q4,C2,Q2,C3,Q1,R quantum;
 ```
 
-> The `8 → 4 → 2 → 1` count is the **logical** number of *active* wires the conv/pool gates operate on (the HEP-style QCNN structure). The state is always 8 physical qubits — pooling concentrates information onto fewer wires rather than deleting qubits — so at the end we read observables on **all 8 wires**, not just the single pooled qubit. The original HEP repo measured only that one centre qubit (fine for binary classification); for 3-class lensing we widen the readout to 32 features, because the 1-qubit (and even the 8-value `⟨Z⟩`-only) readout was a bottleneck that pinned the loss near `ln(3)`.
+> The `8 → 4 → 2 → 1` count is the **logical** number of *active* wires the conv/pool gates operate on (the QCNN structure). The state is always 8 physical qubits — pooling concentrates information onto fewer wires rather than deleting qubits — so at the end we read observables on **all 8 wires**, not just the single pooled qubit. The original construction measured only that one centre qubit (fine for binary classification); for 3-class lensing we widen the readout to 32 features, because the 1-qubit (and even the 8-value `⟨Z⟩`-only) readout was a bottleneck that pinned the loss near `ln(3)`.
 
 `IsingZZ` and `IsingYY` are built from native `CNOT·RZ·CNOT` (with `RX(±π/2)` basis changes for `YY`), and we checked that they match the PennyLane originals bit-for-bit. Everything is expressed with batched `rx/ry/rz/cnot/crx` gates so the circuit trains end-to-end on GPU with autograd.
 
@@ -129,7 +129,7 @@ Per-class ROC AUC for the best (angle) variant: `axion` 0.9992 · `cdm` 0.9984 �
 
 ## Is the quantum circuit actually learning? (ablation)
 
-A fair question with any hybrid model is whether the quantum part is doing real work, or whether the classical encoder is quietly carrying the whole thing. We ran a controlled ablation in [`notebooks/equivariant/eqnn_hep_torchquantum/eqnn_hep_p4m_qcnn_lensing_ablation.ipynb`](notebooks/equivariant/eqnn_hep_torchquantum/eqnn_hep_p4m_qcnn_lensing_ablation.ipynb), which uses the same EQNN-for-HEP equivariant filters (`U2`/`U4` built from `RX` + `IsingZZ`/`IsingYY`, tied per p4m orbit) that the QVF circuit is built from.
+A fair question with any hybrid model is whether the quantum part is doing real work, or whether the classical encoder is quietly carrying the whole thing. We ran a controlled ablation in [`notebooks/equivariant/eqnn_hep_torchquantum/eqnn_hep_p4m_qcnn_lensing_ablation.ipynb`](notebooks/equivariant/eqnn_hep_torchquantum/eqnn_hep_p4m_qcnn_lensing_ablation.ipynb), which uses the same equivariant filters (`U2`/`U4` built from `RX` + `IsingZZ`/`IsingYY`, tied per p4m orbit) that the QVF circuit is built from.
 
 The setup keeps the encoder and the classification head **byte-for-byte identical** and only swaps the `256 → 8` core. Same data, same epochs, same optimizer, same seed — so any gap is the core, not capacity or luck. Three cores are compared:
 
