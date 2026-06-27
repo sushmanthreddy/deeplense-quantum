@@ -1,7 +1,7 @@
 {
-  "test_acc": 0.9998666666666667,
-  "macro_auc": 0.9999999533333334,
-  "macro_f1": 0.9998666666666667,
+  "test_acc": 1.0,
+  "macro_auc": 1.0,
+  "macro_f1": 1.0,
   "best_val_acc": 0.9999438864261265,
   "total_params": 8913700,
   "encoder_params": 8913640,
