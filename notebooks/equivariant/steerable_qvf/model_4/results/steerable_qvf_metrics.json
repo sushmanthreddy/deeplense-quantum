@@ -1,0 +1,16 @@
+{
+  "test_acc": 0.342352224253504,
+  "macro_auc": 0.5012320463814293,
+  "macro_f1": 0.23830306727369024,
+  "best_val_acc": 0.34488421744128755,
+  "total_params": 8913700,
+  "encoder_params": 8913640,
+  "quantum_params": 33,
+  "head_params": 27,
+  "group": "C4",
+  "classes": [
+    "axion",
+    "cdm",
+    "no_sub"
+  ]
+}
