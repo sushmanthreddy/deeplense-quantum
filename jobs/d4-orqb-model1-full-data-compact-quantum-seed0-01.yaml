@@ -1,0 +1,366 @@
+apiVersion: kubeflow.org/v1
+kind: PyTorchJob
+metadata:
+  name: d4-orqb-m1-compact-full-s0-01
+  namespace: sbg-mechanistic-interpretability
+  labels:
+    project: deeplense-quantum
+    dataset: model-i
+    stage: full-data-compact-quantum
+    seed: "0"
+spec:
+  nprocPerNode: "1"
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1
+      restartPolicy: Never
+      template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: pytorch
+            image: docker.io/pytorch/pytorch@sha256:971fbeae82c0a5a7a970a264a8b8ce1c3426aa79df7111004ad2bc2640f7d89c
+            command: [bash, -lc]
+            args:
+            - |
+              set -euo pipefail
+
+              SOURCE_REPO=/workspace/data/repos/deeplense-quantum
+              RUN_REPO=$(mktemp -d /tmp/deeplense-quantum-compact-full-s0-01.XXXXXX)
+              EXPECTED_SOURCE_SHA256=1c55b9960c02d4f2ccd2c7821be86fb6c50aeb85800ea8d8bdb4c2dc1bb4caec
+
+              cp -a "${SOURCE_REPO}/src" "${RUN_REPO}/src"
+              cp -a "${SOURCE_REPO}/tests" "${RUN_REPO}/tests"
+              cd "${RUN_REPO}"
+              export LC_ALL=C
+              SOURCE_SHA256=$(find src/d4_orqb tests -type f -name '*.py' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+              echo SOURCE_SHA256="${SOURCE_SHA256}"
+              test "${SOURCE_SHA256}" = "${EXPECTED_SOURCE_SHA256}"
+
+              export PYTHONPATH="${RUN_REPO}/src"
+              export PYTHONUNBUFFERED=1
+              export PYTHONHASHSEED=0
+              export OMP_NUM_THREADS=4
+              export MKL_NUM_THREADS=4
+              export CUBLAS_WORKSPACE_CONFIG=:4096:8
+              export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256
+
+              python -m unittest discover -s tests -v
+              nvidia-smi
+              python - <<'PY'
+              import json
+              import torch
+
+              assert torch.cuda.is_available()
+              assert torch.cuda.device_count() == 1
+              value = torch.arange(1024, device='cuda', dtype=torch.float32)
+              assert float(value.square().sum().cpu()) > 0
+              print('CUDA_CONTRACT', json.dumps({
+                  'torch': torch.__version__,
+                  'cuda_runtime': torch.version.cuda,
+                  'gpu': torch.cuda.get_device_name(0),
+                  'gpu_count': torch.cuda.device_count(),
+                  'bf16_supported': torch.cuda.is_bf16_supported(),
+              }, sort_keys=True), flush=True)
+              PY
+
+              DATA=/workspace/data/datasets/DEEPLENS_DATASETS
+              CACHE_ROOT=/workspace/data/cache/d4-orqb
+              DEVELOPMENT_CACHE=${CACHE_ROOT}/model_i_96_v1/development
+              SPLIT_FILE=${CACHE_ROOT}/model_i_96_v1/split_seed42_val0.2000.npz
+              ROOT=/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/full-data-compact/spatial-stat122573-seed0-01
+              RUN=${ROOT}/quantum
+              UNUSED_TEST_SENTINEL=${DATA}/__OFFICIAL_TEST_LOCKED__
+
+              test -d "${DATA}/Model_I"
+              test -d "${DEVELOPMENT_CACHE}"
+              test ! -L "${DEVELOPMENT_CACHE}"
+              test ! -e "${UNUSED_TEST_SENTINEL}"
+              test ! -e "${ROOT}"
+              test ! -L "${ROOT}"
+              test "$(sha256sum "${DEVELOPMENT_CACHE}/images.npy" | cut -d' ' -f1)" = c3c639584e0a9e2d6ba369e3fb41ba0451b2170a362ec419fa1182e55d5ce070
+              test "$(sha256sum "${DEVELOPMENT_CACHE}/labels.npy" | cut -d' ' -f1)" = 3a12100d1df155738b57255e6625ba1287c2d74c5bab53bce2cd0597afe89b17
+              test "$(sha256sum "${DEVELOPMENT_CACHE}/metadata.json" | cut -d' ' -f1)" = 9f36faff5fc3300b97512b1c29439b2e993888318a31835938749e10fbf12379
+              test "$(sha256sum "${DEVELOPMENT_CACHE}/manifest.csv" | cut -d' ' -f1)" = c04a3c62afebe3f660ffaad4333b6632471a91c6f5f239f84e68b4b94c330025
+              test "$(sha256sum "${SPLIT_FILE}" | cut -d' ' -f1)" = 143a759d9b4e6f5d6e8906a3b4ce38026528634f422f1953b9ae69cab7e59ff1
+
+              export DEVELOPMENT_CACHE SPLIT_FILE ROOT RUN SOURCE_SHA256
+              python - <<'PY'
+              import json
+              import os
+              from pathlib import Path
+
+              import numpy as np
+
+              development = Path(os.environ['DEVELOPMENT_CACHE'])
+              metadata = json.loads((development / 'metadata.json').read_text())
+              labels = np.load(development / 'labels.npy', mmap_mode='r')
+              split = np.load(os.environ['SPLIT_FILE'])
+              train_indices = split['train']
+              validation_indices = split['val']
+
+              assert metadata['samples'] == 87525
+              assert tuple(labels.shape) == (87525,)
+              assert len(train_indices) == 70021
+              assert len(validation_indices) == 17504
+              assert len(np.intersect1d(train_indices, validation_indices)) == 0
+              assert len(np.union1d(train_indices, validation_indices)) == 87525
+              assert int(split['seed']) == 42
+              assert float(split['val_fraction']) == 0.2
+
+              root = Path(os.environ['ROOT'])
+              root.mkdir(parents=True, exist_ok=False)
+              protocol = {
+                  'schema_version': 1,
+                  'protocol_id': 'model-i-full-data-compact-quantum-seed0-v1',
+                  'source_sha256': os.environ['SOURCE_SHA256'],
+                  'immutable_training_image': 'docker.io/pytorch/pytorch@sha256:971fbeae82c0a5a7a970a264a8b8ce1c3426aa79df7111004ad2bc2640f7d89c',
+                  'model': {
+                      'core': 'quantum',
+                      'encoder_variant': 'micro-stat',
+                      'physics_variant': 'base',
+                      'physics_summary': 'moments',
+                      'quantum_encoding': 'angle',
+                      'observable_readout': 'pair',
+                      'heads': 4,
+                      'reuploads': 3,
+                      'total_trainable_parameters': 122573,
+                      'quantum_trainable_parameters': 132,
+                  },
+                  'data': {
+                      'dataset': 'Model_I development only',
+                      'canonical_development_samples': 87525,
+                      'canonical_training_samples': 70021,
+                      'canonical_validation_samples': 17504,
+                      'max_train_per_class': None,
+                      'split_seed': 42,
+                      'official_test_opened': False,
+                  },
+                  'optimization': {
+                      'seed': 0,
+                      'training_rng_seed': 20000,
+                      'epochs': 20,
+                      'batch_size': 256,
+                      'full_data_steps_per_epoch': 274,
+                      'total_optimizer_steps': 5480,
+                      'selection': 'predeclared final epoch only',
+                  },
+                  'initialization': {
+                      'method': 'seeded random initialization from scratch',
+                      'half_data_checkpoint_used': False,
+                      'rationale': 'The earlier half-data checkpoint already has a reported result on this canonical validation set and contains 5,480 prior optimizer updates. Reusing it would double the training budget and confound a clean full-data architecture assessment.',
+                  },
+                  'compute_budget_rationale': 'Twenty full-data epochs equal 5,480 optimizer steps, matching forty half-data epochs at batch size 256 while exposing every one of the 70,021 canonical training images.',
+                  'cudaq': {
+                      'execution_in_training_job': False,
+                      'training_job_action': 'export deterministic learned-circuit parity fixture only',
+                      'verification_backend': 'nvidia',
+                      'verification_image': 'nvcr.io/nvidia/quantum/cuda-quantum@sha256:84901e99f1d83e0abdb7b02f9870cef1fb1122f889e53af5a0af2c6b7fe3596e',
+                      'verification_version': '0.12.0',
+                      'verification_cuda_major': 11,
+                      'compatibility_rationale': 'Pinned CUDA 11 image matches the cluster driver and the PyTorch training runtime while retaining the required NVIDIA statevector target.',
+                  },
+              }
+              (root / 'predecision_protocol.json').write_text(
+                  json.dumps(protocol, indent=2, sort_keys=True, allow_nan=False) + '\n'
+              )
+              print('PREDECISION_PROTOCOL', json.dumps(protocol, sort_keys=True), flush=True)
+              PY
+
+              python - <<'PY'
+              import json
+
+              from d4_orqb.model import D4OrbitClassifier
+
+              model = D4OrbitClassifier(
+                  core='quantum',
+                  encoder_variant='micro-stat',
+                  physics_variant='base',
+                  physics_summary='moments',
+                  quantum_encoding='angle',
+                  observable_readout='pair',
+                  heads=4,
+                  reuploads=3,
+                  dropout=0.10,
+              )
+              report = model.parameter_report()
+              circuit_report = model.core.parameter_report()
+              assert report['total'] == 122573, report
+              assert report['encoder'] == 119682, report
+              assert report['orbit_projection'] == 1672, report
+              assert report['quantum'] == 132, report
+              assert report['head_and_context'] == 1087, report
+              assert circuit_report['qubits'] == 8, circuit_report
+              assert circuit_report['invariants'] == 48, circuit_report
+              print('PREFLIGHT_PARAMETERS', json.dumps({
+                  'model': report,
+                  'circuit': circuit_report,
+              }, sort_keys=True), flush=True)
+              PY
+
+              python -m d4_orqb.train \
+                --development-root "${DATA}/Model_I" \
+                --test-root "${UNUSED_TEST_SENTINEL}" \
+                --cache-root "${CACHE_ROOT}" \
+                --output-dir "${RUN}" \
+                --image-size 96 \
+                --core quantum \
+                --encoder-variant micro-stat \
+                --physics-variant base \
+                --physics-summary moments \
+                --quantum-encoding angle \
+                --observable-readout pair \
+                --heads 4 \
+                --reuploads 3 \
+                --epochs 20 \
+                --patience 21 \
+                --validation-interval 20 \
+                --fixed-final-validation-only \
+                --save-last-validation-predictions \
+                --deterministic \
+                --training-rng-seed 20000 \
+                --save-stochastic-trace \
+                --batch-size 256 \
+                --workers 4 \
+                --io-workers 8 \
+                --encoder-learning-rate 0.0005 \
+                --learning-rate 0.003 \
+                --core-learning-rate 0.005 \
+                --weight-decay 0.0001 \
+                --label-smoothing 0.02 \
+                --dropout 0.10 \
+                --photon-noise-probability 0.5 \
+                --photon-count-min 2048 \
+                --photon-count-max 8192 \
+                --seed 0 \
+                --split-seed 42
+
+              python - <<'PY'
+              import json
+              import os
+              from pathlib import Path
+
+              run = Path(os.environ['RUN'])
+              config = json.loads((run / 'config.json').read_text())
+              data = json.loads((run / 'data_report.json').read_text())
+              parameters = json.loads((run / 'parameter_report.json').read_text())
+              summary = json.loads((run / 'summary.json').read_text())
+
+              assert config['evaluate_test'] is False
+              assert config['max_train_per_class'] is None
+              assert config['max_val_per_class'] is None
+              assert config['init_backbone_checkpoint'] is None
+              assert config['init_compatible_backbone_checkpoint'] is None
+              assert config['init_full_checkpoint'] is None
+              assert config['encoder_variant'] == 'micro-stat'
+              assert config['physics_summary'] == 'moments'
+              assert config['heads'] == 4
+              assert config['reuploads'] == 3
+              assert config['epochs'] == 20
+              assert config['seed'] == 0
+              assert config['split_seed'] == 42
+
+              assert data['train_size'] == 70021, data
+              assert data['validation_size'] == 17504, data
+              assert data['train_counts'] == {
+                  'axion': 23118,
+                  'cdm': 23818,
+                  'no_sub': 23085,
+              }, data
+              assert data['validation_counts'] == {
+                  'axion': 5779,
+                  'cdm': 5954,
+                  'no_sub': 5771,
+              }, data
+              assert data['official_test_locked_during_selection'] is True
+              assert data['official_test_cache_opened'] is False
+              assert 'test' not in data
+              assert 'digest_disjoint' not in data
+
+              assert parameters['total'] == 122573, parameters
+              assert parameters['encoder'] == 119682, parameters
+              assert parameters['orbit_projection'] == 1672, parameters
+              assert parameters['quantum'] == 132, parameters
+              assert parameters['head_and_context'] == 1087, parameters
+              assert parameters['circuit_qubits'] == 8, parameters
+              assert parameters['circuit_invariants'] == 48, parameters
+              assert summary['parameters'] == parameters
+              assert summary['official_test_evaluated'] is False
+              assert summary['best_epoch'] == 20, summary
+              assert summary['validation']['samples'] == 17504, summary
+              assert 'test' not in summary
+              assert (run / 'best.pt').is_file()
+              assert (run / 'last_validation_predictions.npz').is_file()
+              assert not (run / 'test_predictions.npz').exists()
+              print('TRAINING_AUDIT', json.dumps({
+                  'best_epoch': summary['best_epoch'],
+                  'parameters': parameters['total'],
+                  'train_size': data['train_size'],
+                  'validation': summary['validation'],
+                  'official_test_evaluated': summary['official_test_evaluated'],
+              }, sort_keys=True), flush=True)
+              PY
+
+              python -m d4_orqb.cudaq_backend export-fixture \
+                --run-dir "${RUN}" \
+                --checkpoint "${RUN}/best.pt" \
+                --development-cache "${DEVELOPMENT_CACHE}" \
+                --output "${RUN}/cudaq_fixture.npz" \
+                --split validation \
+                --seed 0 \
+                --max-samples 16
+
+              test -s "${RUN}/cudaq_fixture.npz"
+              python - <<'PY'
+              import hashlib
+              import json
+              import os
+              from pathlib import Path
+
+              root = Path(os.environ['ROOT'])
+              fixture = Path(os.environ['RUN']) / 'cudaq_fixture.npz'
+              fixture_sha256 = hashlib.sha256(fixture.read_bytes()).hexdigest()
+              artifact_hashes = {}
+              for path in sorted(root.rglob('*')):
+                  if path.is_file() and path.name != 'artifact_sha256.json':
+                      artifact_hashes[str(path.relative_to(root))] = hashlib.sha256(
+                          path.read_bytes()
+                      ).hexdigest()
+              (root / 'artifact_sha256.json').write_text(
+                  json.dumps(artifact_hashes, indent=2, sort_keys=True) + '\n'
+              )
+              print('CUDAQ_FIXTURE', json.dumps({
+                  'path': str(fixture),
+                  'sha256': fixture_sha256,
+                  'execution_deferred_to_pinned_cudaq_nvidia_job': True,
+              }, sort_keys=True), flush=True)
+              print('ARTIFACT_COUNT', len(artifact_hashes), flush=True)
+              PY
+              chmod -R g+rX "${ROOT}"
+            env:
+            - name: XDG_CACHE_HOME
+              value: /workspace/data/cache/xdg
+            - name: TORCH_HOME
+              value: /workspace/data/cache/torch
+            volumeMounts:
+            - name: data-volume
+              mountPath: /workspace/data
+            resources:
+              requests:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+              limits:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+          volumes:
+          - name: data-volume
+            persistentVolumeClaim:
+              claimName: susmered-datavol-1
+  runPolicy:
+    cleanPodPolicy: None
+    suspend: false

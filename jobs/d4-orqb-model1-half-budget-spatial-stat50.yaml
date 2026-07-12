@@ -1,0 +1,239 @@
+apiVersion: kubeflow.org/v1
+kind: PyTorchJob
+metadata:
+  name: d4-orqb-m1-half-stat50-02
+  namespace: sbg-mechanistic-interpretability
+  labels:
+    project: deeplense-quantum
+    dataset: model-i
+    stage: half-budget-spatial-statistics
+spec:
+  nprocPerNode: "1"
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1
+      template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: pytorch
+            image: docker.io/pytorch/pytorch:2.1.2-cuda11.8-cudnn8-runtime
+            command: [bash, -lc]
+            args:
+            - |
+              set -euo pipefail
+              SOURCE_REPO=/workspace/data/repos/deeplense-quantum
+              RUN_REPO=$(mktemp -d /tmp/deeplense-quantum-stat50-02.XXXXXX)
+              EXPECTED_SOURCE_SHA256=76b8777a3cb5bd41c460e324dabd38de7abce660c3ee86008c5094408f46e377
+              EXPECTED_BACKBONE_SHA256=2d3c49b94f60855279c878af925a34b6e274ee00c81f0d5ae758ceaadb8af200
+              cp -a ${SOURCE_REPO}/src ${RUN_REPO}/src
+              cp -a ${SOURCE_REPO}/tests ${RUN_REPO}/tests
+              cd ${RUN_REPO}
+              export LC_ALL=C
+              SOURCE_SHA256=$(find src/d4_orqb tests -type f -name '*.py' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+              echo SOURCE_SHA256=${SOURCE_SHA256}
+              test "${SOURCE_SHA256}" = "${EXPECTED_SOURCE_SHA256}"
+              export PYTHONPATH=${RUN_REPO}/src
+              export PYTHONUNBUFFERED=1
+              export OMP_NUM_THREADS=4
+              export MKL_NUM_THREADS=4
+              export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256
+
+              python -m unittest tests.test_d4_orqb -v
+              nvidia-smi
+              DATA=/workspace/data/datasets/DEEPLENS_DATASETS
+              CACHE=/workspace/data/cache/d4-orqb
+              BASE=/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/reduced-data
+              BACKBONE=${BASE}/micro50-01/context/best.pt
+              ROOT=${BASE}/spatial-stat50-02
+              BACKBONE_SHA256=$(sha256sum ${BACKBONE} | cut -d' ' -f1)
+              echo BACKBONE_SHA256=${BACKBONE_SHA256}
+              test "${BACKBONE_SHA256}" = "${EXPECTED_BACKBONE_SHA256}"
+              mkdir -p ${ROOT}
+              export ROOT SOURCE_SHA256 BACKBONE_SHA256
+
+              python - <<'PY'
+              import json
+              import os
+              from pathlib import Path
+
+              root = Path(os.environ['ROOT'])
+              provenance = {
+                  'source_sha256': os.environ['SOURCE_SHA256'],
+                  'source_hash_locale': 'C',
+                  'initial_backbone_sha256': os.environ['BACKBONE_SHA256'],
+                  'candidate': 'parameter-free learned-feature mean/std pooling with three symmetry-tied reuploads',
+                  'training_images': 35001,
+                  'training_fraction_of_canonical_train': 35001 / 70021,
+                  'inference_parameter_ceiling': 245221 // 2,
+                  'selection_scope': 'Model-I development validation only',
+                  'official_test_opened': False,
+              }
+              (root / 'provenance.json').write_text(
+                  json.dumps(provenance, indent=2, sort_keys=True) + '\n'
+              )
+              print('PROVENANCE', json.dumps(provenance, sort_keys=True), flush=True)
+              PY
+
+              COMMON_ARGS="
+                --development-root ${DATA}/Model_I
+                --test-root ${DATA}/Model_I_test
+                --cache-root ${CACHE} --image-size 96
+                --encoder-variant micro-stat --physics-variant base
+                --physics-summary moments --quantum-encoding angle
+                --observable-readout pair --heads 4 --reuploads 3
+                --epochs 40 --patience 8 --validation-interval 2
+                --batch-size 256 --workers 4 --io-workers 8
+                --encoder-learning-rate 0.0005 --learning-rate 0.003
+                --core-learning-rate 0.005 --weight-decay 0.0001
+                --label-smoothing 0.02 --dropout 0.10
+                --photon-noise-probability 0.5
+                --photon-count-min 2048 --photon-count-max 8192
+                --max-train-per-class 11667 --train-subset-protocol hash-v1
+                --seed 0 --split-seed 42
+                --init-backbone-checkpoint ${BACKBONE}"
+
+              python -m d4_orqb.train ${COMMON_ARGS} \
+                --core quantum --output-dir ${ROOT}/quantum
+              python -m d4_orqb.train ${COMMON_ARGS} \
+                --core classical --output-dir ${ROOT}/classical
+
+              python - <<'PY'
+              import hashlib
+              import json
+              from pathlib import Path
+              import numpy as np
+              from d4_orqb.evaluate_locked import (
+                  metrics_from_probabilities,
+                  stratified_paired_bootstrap_accuracy,
+              )
+
+              root = Path('/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/reduced-data/spatial-stat50-02')
+              reduced = root.parent
+              model_root = reduced.parent
+              expected_membership = '571d23ced25095cf0cfb57216654f9b7be289b0589a95489a5a815a866aaee71'
+              expected_manifest = 'c04a3c62afebe3f660ffaad4333b6632471a91c6f5f239f84e68b4b94c330025'
+              expected_source = '76b8777a3cb5bd41c460e324dabd38de7abce660c3ee86008c5094408f46e377'
+
+              for name in ('quantum', 'classical'):
+                  run = root / name
+                  report = json.loads((run / 'data_report.json').read_text())
+                  params = json.loads((run / 'parameter_report.json').read_text())
+                  config = json.loads((run / 'config.json').read_text())
+                  summary = json.loads((run / 'summary.json').read_text())
+                  initialization = json.loads((run / 'initialization_report.json').read_text())
+                  assert report['train_size'] == 35001
+                  assert report['train_membership_sha256'] == expected_membership
+                  assert report['development_manifest_sha256'] == expected_manifest
+                  assert report['official_test_cache_opened'] is False
+                  assert config['evaluate_test'] is False
+                  assert config['encoder_variant'] == 'micro-stat'
+                  assert config['reuploads'] == 3
+                  assert config['photon_noise_probability'] == 0.5
+                  assert config['max_train_per_class'] == 11667
+                  assert params['total'] == 122573 <= 122610
+                  assert params['core'] == 132
+                  assert params['encoder'] == 119682
+                  assert params['orbit_projection'] == 1672
+                  assert params['head_and_context'] == 1087
+                  assert summary['official_test_evaluated'] is False
+                  projection_adaptation = next(
+                      item for item in initialization['adapted_tensors']
+                      if item['key'] == 'orbit_projection.weight'
+                  )
+                  assert projection_adaptation['source_shape'] == [8, 112]
+                  assert projection_adaptation['target_shape'] == [8, 208]
+                  assert projection_adaptation['insert_before_tail'] == 16
+                  assert projection_adaptation['method'] == 'copy-prefix-and-tail-zero-inserted-inputs'
+                  if name == 'quantum':
+                      assert params['quantum'] == 132
+                      assert params['core_architecture'] == 'quantum'
+                  else:
+                      assert params['quantum'] == 0
+                      assert params['core_architecture'] == 'classical'
+
+              paths = {
+                  'spatial-stat-quantum': root / 'quantum' / 'best_validation_predictions.npz',
+                  'spatial-stat-classical': root / 'classical' / 'best_validation_predictions.npz',
+                  'photon-quantum': reduced / 'morph50-02' / 'photon-quantum' / 'best_validation_predictions.npz',
+                  'kd-student': reduced / 'kd-ensemble50-02' / 'student' / 'best_validation_predictions.npz',
+                  'full-q0': model_root / 'full-development-01' / 'quantum' / 'best_validation_predictions.npz',
+              }
+              predictions = {}
+              prediction_sha256 = {}
+              reference_indices = reference_labels = None
+              for name, path in paths.items():
+                  prediction_sha256[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+                  with np.load(path, allow_pickle=False) as data:
+                      order = np.argsort(data['indices'])
+                      indices = data['indices'][order]
+                      labels = data['labels'][order]
+                      probabilities = data['probabilities'][order].astype(np.float64)
+                  if reference_indices is None:
+                      reference_indices, reference_labels = indices, labels
+                  else:
+                      assert np.array_equal(indices, reference_indices)
+                      assert np.array_equal(labels, reference_labels)
+                  predictions[name] = probabilities
+
+              metrics = {
+                  name: metrics_from_probabilities(
+                      reference_labels, probability, ['axion', 'cdm', 'no_sub']
+                  )
+                  for name, probability in predictions.items()
+              }
+              comparisons = {}
+              for candidate, reference in (
+                  ('spatial-stat-quantum', 'spatial-stat-classical'),
+                  ('spatial-stat-quantum', 'photon-quantum'),
+                  ('spatial-stat-quantum', 'kd-student'),
+                  ('spatial-stat-quantum', 'full-q0'),
+              ):
+                  comparisons[f'{candidate}-vs-{reference}'] = (
+                      stratified_paired_bootstrap_accuracy(
+                          reference_labels,
+                          predictions[candidate],
+                          predictions[reference],
+                          samples=10000,
+                          seed=20260713,
+                      )
+                  )
+              result = {
+                  'scope': 'Model-I development validation only; no test cache opened',
+                  'source_sha256': expected_source,
+                  'training_images': 35001,
+                  'inference_parameter_ceiling': 122610,
+                  'candidate_parameters': 122573,
+                  'candidate_quantum_parameters': 132,
+                  'metrics': metrics,
+                  'comparisons': comparisons,
+                  'prediction_file_sha256': prediction_sha256,
+              }
+              (root / 'analysis.json').write_text(
+                  json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + '\n'
+              )
+              print('SPATIAL_STAT50_ANALYSIS', json.dumps(result, sort_keys=True), flush=True)
+              PY
+              chmod -R g+rX ${ROOT}
+            volumeMounts:
+            - name: data-volume
+              mountPath: /workspace/data
+            resources:
+              requests:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+              limits:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+          volumes:
+          - name: data-volume
+            persistentVolumeClaim:
+              claimName: susmered-datavol-1
+  runPolicy:
+    cleanPodPolicy: None
+    suspend: false

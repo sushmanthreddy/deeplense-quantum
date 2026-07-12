@@ -1,0 +1,206 @@
+apiVersion: kubeflow.org/v1
+kind: PyTorchJob
+metadata:
+  name: d4-orqb-m1-v3-dev-replay
+  namespace: sbg-mechanistic-interpretability
+  labels:
+    project: deeplense-quantum
+    dataset: model-i
+    stage: v3-development-replay
+spec:
+  nprocPerNode: "1"
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1
+      template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: pytorch
+            image: docker.io/pytorch/pytorch:2.1.2-cuda11.8-cudnn8-runtime
+            command: [bash, -lc]
+            args:
+            - |
+              set -euo pipefail
+              cd /workspace/data/repos/deeplense-quantum
+              export PYTHONPATH=/workspace/data/repos/deeplense-quantum/src
+              export PYTHONUNBUFFERED=1
+              export OMP_NUM_THREADS=4
+              export MKL_NUM_THREADS=4
+
+              nvidia-smi
+              python - <<'PY'
+              import json
+              from pathlib import Path
+              from types import SimpleNamespace
+
+              import numpy as np
+              import torch
+
+              from d4_orqb.evaluate_locked import (
+                  CACHE_ARTIFACTS,
+                  _load_sealed_model,
+                  _make_eval_loader,
+                  _materialize_ensembles,
+                  _metric_close,
+                  assert_fingerprints_equal,
+                  atomic_json,
+                  evaluate_model,
+                  fingerprint_named_files,
+                  load_and_verify_seal,
+                  load_validation_predictions,
+                  metrics_from_probabilities,
+                  probability_replay_diagnostics,
+                  validate_cache_structure,
+                  validate_split_indices,
+              )
+
+              root = Path('/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i')
+              seal_dir = root / 'locked/d4-orqb-model-i-v3-20260711-seal'
+              development_cache = Path(
+                  '/workspace/data/cache/d4-orqb/model_i_96_v1/development'
+              )
+              output = root / 'diagnostics/d4-replay-v3-pretest.json'
+              manifest, seal = load_and_verify_seal(seal_dir)
+              class_names = manifest['development_cache']['classes']
+              before = fingerprint_named_files(development_cache, CACHE_ARTIFACTS)
+              assert_fingerprints_equal(
+                  before,
+                  manifest['development_cache']['artifacts'],
+                  'development cache before v3 pretest replay',
+              )
+              development = validate_cache_structure(development_cache, class_names)
+              protocol = manifest['protocol']
+              gates = {
+                  'max_probability_absolute_difference': float(
+                      protocol['validation_replay_probability_atol']
+                  ),
+                  'mean_probability_absolute_difference': float(
+                      protocol['validation_replay_probability_mean_atol']
+                  ),
+                  'p99_probability_absolute_difference': float(
+                      protocol['validation_replay_probability_p99_atol']
+                  ),
+                  'max_metric_absolute_difference': float(
+                      protocol['validation_replay_metric_atol']
+                  ),
+                  'predicted_classes_exact': True,
+              }
+              args = SimpleNamespace(batch_size=128, workers=4, loader_seed=42)
+              device = torch.device('cuda')
+              replay_probabilities = {}
+              member_diagnostics = {}
+              reference_labels = None
+
+              for name, member in manifest['members'].items():
+                  member_dir = seal_dir / 'members' / name
+                  with np.load(member_dir / 'split_indices.npz', allow_pickle=False) as split:
+                      _, validation_indices = validate_split_indices(
+                          development['labels'], split['train'], split['val']
+                      )
+                  expected = load_validation_predictions(
+                      member_dir / 'best_validation_predictions.npz',
+                      validation_indices,
+                      development['labels'],
+                      class_names,
+                  )
+                  model = _load_sealed_model(
+                      seal_dir, name, member, len(class_names), device
+                  )
+                  actual = evaluate_model(
+                      model,
+                      member['kind'],
+                      _make_eval_loader(development_cache, validation_indices, args),
+                      device,
+                  )
+                  del model
+                  torch.cuda.empty_cache()
+                  if not np.array_equal(actual['indices'], expected['indices']):
+                      raise RuntimeError(f'Validation index mismatch for {name}')
+                  if not np.array_equal(actual['labels'], expected['labels']):
+                      raise RuntimeError(f'Validation label mismatch for {name}')
+                  diagnostics = probability_replay_diagnostics(
+                      actual['probabilities'], expected['probabilities']
+                  )
+                  failed = (
+                      diagnostics['max_probability_absolute_difference']
+                      > gates['max_probability_absolute_difference']
+                      or diagnostics['mean_probability_absolute_difference']
+                      > gates['mean_probability_absolute_difference']
+                      or diagnostics['p99_probability_absolute_difference']
+                      > gates['p99_probability_absolute_difference']
+                      or not diagnostics['predicted_classes_exact']
+                  )
+                  if failed:
+                      raise RuntimeError(
+                          f'V3 pretest replay probability gate failed for {name}: '
+                          f'{diagnostics}'
+                      )
+                  replay_probabilities[name] = actual['probabilities']
+                  member_diagnostics[name] = diagnostics
+                  if reference_labels is None:
+                      reference_labels = actual['labels']
+                  elif not np.array_equal(reference_labels, actual['labels']):
+                      raise RuntimeError('Members have different validation labels')
+
+              all_probabilities = _materialize_ensembles(
+                  replay_probabilities, manifest['ensembles']
+              )
+              result_metric_drift = {}
+              for name, probabilities in all_probabilities.items():
+                  metrics = metrics_from_probabilities(
+                      reference_labels, probabilities, class_names
+                  )
+                  maximum_difference = _metric_close(
+                      metrics,
+                      manifest['validation_plan_metrics'][name],
+                      f'v3 pretest validation plan for {name}',
+                      tolerance=gates['max_metric_absolute_difference'],
+                  )
+                  result_metric_drift[name] = {
+                      'max_metric_absolute_difference': maximum_difference,
+                      'metrics': metrics,
+                  }
+
+              after = fingerprint_named_files(development_cache, CACHE_ARTIFACTS)
+              assert_fingerprints_equal(
+                  after, before, 'development cache during v3 pretest replay'
+              )
+              result = {
+                  'scope': (
+                      'DeepLense Model-I development validation only; this job has no '
+                      'official-test path or argument.'
+                  ),
+                  'status': 'PASSED',
+                  'frozen_manifest_sha256': seal['manifest_sha256'],
+                  'gates': gates,
+                  'members': member_diagnostics,
+                  'all_results': result_metric_drift,
+              }
+              output.parent.mkdir(parents=True, exist_ok=True)
+              atomic_json(output, result)
+              print('V3_DEVELOPMENT_REPLAY_PASSED', json.dumps(result, sort_keys=True))
+              PY
+              chmod g+r /workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/diagnostics/d4-replay-v3-pretest.json
+            volumeMounts:
+            - name: data-volume
+              mountPath: /workspace/data
+            resources:
+              requests:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+              limits:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+          volumes:
+          - name: data-volume
+            persistentVolumeClaim:
+              claimName: susmered-datavol-1
+  runPolicy:
+    cleanPodPolicy: None
+    suspend: false

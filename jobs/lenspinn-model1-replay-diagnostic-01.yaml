@@ -1,0 +1,157 @@
+apiVersion: kubeflow.org/v1
+kind: PyTorchJob
+metadata:
+  name: lenspinn-m1-replay-diag-01
+  namespace: sbg-mechanistic-interpretability
+  labels:
+    project: deeplense-quantum
+    dataset: model-i
+    stage: development-replay-diagnostic
+spec:
+  nprocPerNode: "1"
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1
+      template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: pytorch
+            image: docker.io/pytorch/pytorch:2.1.2-cuda11.8-cudnn8-runtime
+            command: [bash, -lc]
+            args:
+            - |
+              set -euo pipefail
+              cd /workspace/data/repos/deeplense-quantum
+              export PYTHONPATH=/workspace/data/repos/deeplense-quantum/src
+              export PYTHONUNBUFFERED=1
+              export OMP_NUM_THREADS=4
+              export MKL_NUM_THREADS=4
+              export HF_HOME=/workspace/data/models/huggingface
+              python -m pip install --disable-pip-version-check \
+                timm==0.9.16 huggingface_hub==0.23.5 safetensors==0.4.3
+
+              python - <<'PY'
+              import json
+              from pathlib import Path
+              from types import SimpleNamespace
+              import numpy as np
+              import torch
+              from d4_orqb.evaluate_locked import (
+                  _load_sealed_model,
+                  _make_eval_loader,
+                  load_and_verify_seal,
+                  load_validation_predictions,
+                  metrics_from_probabilities,
+                  validate_cache_structure,
+                  validate_split_indices,
+                  evaluate_model,
+              )
+
+              root = Path('/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i')
+              seal_dir = root / 'locked/d4-orqb-model-i-v1-20260711-seal'
+              dev_cache = Path('/workspace/data/cache/d4-orqb/model_i_96_v1/development')
+              output = root / 'diagnostics/lenspinn-replay-01.json'
+              output.parent.mkdir(parents=True, exist_ok=True)
+              manifest, _ = load_and_verify_seal(seal_dir)
+              class_names = manifest['development_cache']['classes']
+              member = manifest['members']['lens']
+              member_dir = seal_dir / 'members/lens'
+              development = validate_cache_structure(dev_cache, class_names)
+              with np.load(member_dir / 'split_indices.npz', allow_pickle=False) as split:
+                  _, val_indices = validate_split_indices(
+                      development['labels'], split['train'], split['val']
+                  )
+              expected = load_validation_predictions(
+                  member_dir / 'best_validation_predictions.npz',
+                  val_indices,
+                  development['labels'],
+                  class_names,
+              )
+              expected_metrics = metrics_from_probabilities(
+                  expected['labels'], expected['probabilities'], class_names
+              )
+              records = []
+              outputs = {}
+              for batch_size in (64, 128, 256):
+                  for repeat in (0, 1):
+                      model = _load_sealed_model(
+                          seal_dir, 'lens', member, len(class_names), torch.device('cuda')
+                      )
+                      args = SimpleNamespace(
+                          batch_size=batch_size, workers=4, loader_seed=42
+                      )
+                      actual = evaluate_model(
+                          model,
+                          member['kind'],
+                          _make_eval_loader(dev_cache, val_indices, args),
+                          torch.device('cuda'),
+                      )
+                      del model
+                      torch.cuda.empty_cache()
+                      difference = np.abs(actual['probabilities'] - expected['probabilities'])
+                      metrics = metrics_from_probabilities(
+                          actual['labels'], actual['probabilities'], class_names
+                      )
+                      key = f'b{batch_size}_r{repeat}'
+                      outputs[key] = actual['probabilities']
+                      records.append({
+                          'key': key,
+                          'batch_size': batch_size,
+                          'repeat': repeat,
+                          'max_probability_abs': float(difference.max()),
+                          'p99_probability_abs': float(np.quantile(difference, 0.99)),
+                          'mean_probability_abs': float(difference.mean()),
+                          'predicted_classes_exact': bool(np.array_equal(
+                              actual['probabilities'].argmax(1),
+                              expected['probabilities'].argmax(1),
+                          )),
+                          'metrics': metrics,
+                          'metric_delta': {
+                              name: float(metrics[name]) - float(expected_metrics[name])
+                              for name in ('accuracy','balanced_accuracy','macro_f1','macro_auc_ovr','nll','brier','ece_15')
+                          },
+                      })
+              pairwise = {}
+              keys = sorted(outputs)
+              for index, first in enumerate(keys):
+                  for second in keys[index + 1:]:
+                      difference = np.abs(outputs[first] - outputs[second])
+                      pairwise[f'{first}__vs__{second}'] = {
+                          'max_probability_abs': float(difference.max()),
+                          'mean_probability_abs': float(difference.mean()),
+                          'predicted_classes_exact': bool(np.array_equal(
+                              outputs[first].argmax(1), outputs[second].argmax(1)
+                          )),
+                      }
+              result = {
+                  'scope': 'Model-I development validation only; no test argument',
+                  'expected_metrics': expected_metrics,
+                  'records': records,
+                  'pairwise': pairwise,
+              }
+              output.write_text(json.dumps(result, indent=2, sort_keys=True, allow_nan=False))
+              print('LENS_REPLAY_DIAGNOSTIC', json.dumps(result, sort_keys=True), flush=True)
+              PY
+            volumeMounts:
+            - name: data-volume
+              mountPath: /workspace/data
+            resources:
+              requests:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+              limits:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+          volumes:
+          - name: data-volume
+            persistentVolumeClaim:
+              claimName: susmered-datavol-1
+  runPolicy:
+    cleanPodPolicy: None
+    suspend: false

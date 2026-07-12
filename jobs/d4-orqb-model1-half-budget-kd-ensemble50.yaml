@@ -1,0 +1,248 @@
+apiVersion: kubeflow.org/v1
+kind: PyTorchJob
+metadata:
+  name: d4-orqb-m1-half-kd-ens50-02
+  namespace: sbg-mechanistic-interpretability
+  labels:
+    project: deeplense-quantum
+    dataset: model-i
+    stage: same-subset-ensemble-distillation
+spec:
+  nprocPerNode: "1"
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1
+      template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: pytorch
+            image: docker.io/pytorch/pytorch:2.1.2-cuda11.8-cudnn8-runtime
+            command: [bash, -lc]
+            args:
+            - |
+              set -euo pipefail
+              SOURCE_REPO=/workspace/data/repos/deeplense-quantum
+              RUN_REPO=$(mktemp -d /tmp/deeplense-quantum-kd-ens50-02.XXXXXX)
+              EXPECTED_SOURCE_SHA256=0497bb52a2e24ac1921bd95e1371bdfa102494ba1b629d9f4e33859853ed4bfb
+              EXPECTED_QUANTUM_SHA256=134d3451341644999b92c53fdc2fc57618e255c08773cbfc5b31abf39f52b8e2
+              EXPECTED_CLASSICAL_SHA256=91566edc6addd0bc9cd6a8674368d9b85c3bd5fb4dee70f10227091a2a0a2f52
+              cp -a ${SOURCE_REPO}/src ${RUN_REPO}/src
+              cp -a ${SOURCE_REPO}/tests ${RUN_REPO}/tests
+              cd ${RUN_REPO}
+              export LC_ALL=C
+              SOURCE_SHA256=$(find src/d4_orqb tests -type f -name '*.py' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+              echo SOURCE_SHA256=${SOURCE_SHA256}
+              test "${SOURCE_SHA256}" = "${EXPECTED_SOURCE_SHA256}"
+              export PYTHONPATH=${RUN_REPO}/src
+              export PYTHONUNBUFFERED=1
+              export OMP_NUM_THREADS=4
+              export MKL_NUM_THREADS=4
+              export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256
+
+              nvidia-smi
+              DATA=/workspace/data/datasets/DEEPLENS_DATASETS
+              CACHE=/workspace/data/cache/d4-orqb
+              BASE=/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/reduced-data/morph50-02
+              Q=${BASE}/photon-quantum
+              C=${BASE}/photon-classical
+              ROOT=/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/reduced-data/kd-ensemble50-02
+              Q_SHA256=$(sha256sum ${Q}/best.pt | cut -d' ' -f1)
+              C_SHA256=$(sha256sum ${C}/best.pt | cut -d' ' -f1)
+              echo QUANTUM_SHA256=${Q_SHA256}
+              echo CLASSICAL_SHA256=${C_SHA256}
+              test "${Q_SHA256}" = "${EXPECTED_QUANTUM_SHA256}"
+              test "${C_SHA256}" = "${EXPECTED_CLASSICAL_SHA256}"
+              mkdir -p ${ROOT}
+              export ROOT SOURCE_SHA256 Q_SHA256 C_SHA256
+
+              python - <<'PY'
+              import json
+              import os
+              from pathlib import Path
+              import numpy as np
+              from d4_orqb.evaluate_locked import metrics_from_probabilities
+
+              base = Path('/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/reduced-data/morph50-02')
+              predictions = []
+              reference_indices = reference_labels = None
+              for name in ('photon-quantum', 'photon-classical'):
+                  with np.load(base / name / 'best_validation_predictions.npz', allow_pickle=False) as data:
+                      order = np.argsort(data['indices'])
+                      indices = data['indices'][order]
+                      labels = data['labels'][order]
+                      probabilities = data['probabilities'][order].astype(np.float64)
+                  if reference_indices is None:
+                      reference_indices, reference_labels = indices, labels
+                  else:
+                      assert np.array_equal(indices, reference_indices)
+                      assert np.array_equal(labels, reference_labels)
+                  predictions.append(probabilities)
+              ensemble = np.mean(predictions, axis=0)
+              ensemble_metrics = metrics_from_probabilities(
+                  reference_labels, ensemble, ['axion', 'cdm', 'no_sub']
+              )
+              student_metrics = metrics_from_probabilities(
+                  reference_labels, predictions[0], ['axion', 'cdm', 'no_sub']
+              )
+              assert ensemble_metrics['accuracy'] > student_metrics['accuracy']
+              assert ensemble_metrics['macro_auc_ovr'] > student_metrics['macro_auc_ovr']
+              provenance = {
+                  'source_sha256': os.environ['SOURCE_SHA256'],
+                  'source_hash_locale': 'C',
+                  'student_initializer_sha256': os.environ['Q_SHA256'],
+                  'teacher_checkpoint_sha256': [
+                      os.environ['Q_SHA256'], os.environ['C_SHA256']
+                  ],
+                  'teacher_method': 'mean class probabilities from same-subset photon quantum/classical pair',
+                  'teacher_validation': ensemble_metrics,
+                  'student_validation_before_kd': student_metrics,
+                  'training_only_teacher': True,
+                  'official_test_opened': False,
+              }
+              root = Path(os.environ['ROOT'])
+              (root / 'provenance.json').write_text(
+                  json.dumps(provenance, indent=2, sort_keys=True) + '\n'
+              )
+              print('PROVENANCE', json.dumps(provenance, sort_keys=True), flush=True)
+              PY
+
+              python -m d4_orqb.train \
+                --development-root ${DATA}/Model_I \
+                --test-root ${DATA}/Model_I_test \
+                --cache-root ${CACHE} --image-size 96 \
+                --encoder-variant micro --physics-variant base \
+                --physics-summary moments --core quantum \
+                --quantum-encoding angle --observable-readout pair \
+                --heads 4 --reuploads 2 --epochs 12 --patience 6 \
+                --validation-interval 1 --batch-size 256 --workers 4 --io-workers 8 \
+                --encoder-learning-rate 0.0001 --learning-rate 0.0006 \
+                --core-learning-rate 0.001 --label-smoothing 0.02 \
+                --photon-noise-probability 0.5 \
+                --photon-count-min 2048 --photon-count-max 8192 \
+                --max-train-per-class 11667 --train-subset-protocol hash-v1 \
+                --seed 0 --split-seed 42 --init-full-checkpoint ${Q}/best.pt \
+                --distillation-teacher-checkpoint ${Q}/best.pt \
+                --distillation-teacher-checkpoint ${C}/best.pt \
+                --distillation-weight 0.5 --distillation-temperature 2.0 \
+                --output-dir ${ROOT}/student
+
+              python - <<'PY'
+              import json
+              from pathlib import Path
+              import numpy as np
+              from d4_orqb.evaluate_locked import (
+                  metrics_from_probabilities,
+                  stratified_paired_bootstrap_accuracy,
+              )
+
+              root = Path('/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/reduced-data/kd-ensemble50-02')
+              run = root / 'student'
+              base = Path('/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/reduced-data/morph50-02')
+              full_q0 = Path('/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/full-development-01/quantum/best_validation_predictions.npz')
+              expected_membership = '571d23ced25095cf0cfb57216654f9b7be289b0589a95489a5a815a866aaee71'
+              expected_manifest = 'c04a3c62afebe3f660ffaad4333b6632471a91c6f5f239f84e68b4b94c330025'
+              report = json.loads((run / 'data_report.json').read_text())
+              params = json.loads((run / 'parameter_report.json').read_text())
+              config = json.loads((run / 'config.json').read_text())
+              summary = json.loads((run / 'summary.json').read_text())
+              initialization = json.loads((run / 'initialization_report.json').read_text())
+              distillation = json.loads((run / 'distillation_report.json').read_text())
+              assert report['train_size'] == 35001
+              assert report['train_membership_sha256'] == expected_membership
+              assert report['development_manifest_sha256'] == expected_manifest
+              assert report['official_test_cache_opened'] is False
+              assert params['total'] == 122437 <= 122610
+              assert params['quantum'] == 88 and params['core_architecture'] == 'quantum'
+              assert config['evaluate_test'] is False
+              assert config['photon_noise_probability'] == 0.5
+              assert config['max_train_per_class'] == 11667
+              assert initialization['checkpoint_sha256'] == '134d3451341644999b92c53fdc2fc57618e255c08773cbfc5b31abf39f52b8e2'
+              assert distillation['teacher_count'] == 2
+              assert distillation['teacher_parameters_total'] == 244874
+              assert distillation['official_test_opened'] is False
+              assert summary['official_test_evaluated'] is False
+
+              predictions = {}
+              reference_indices = reference_labels = None
+              paths = {
+                  'kd-student': run / 'best_validation_predictions.npz',
+                  'photon-quantum': base / 'photon-quantum' / 'best_validation_predictions.npz',
+                  'photon-classical': base / 'photon-classical' / 'best_validation_predictions.npz',
+                  'full-q0': full_q0,
+              }
+              for name, path in paths.items():
+                  with np.load(path, allow_pickle=False) as data:
+                      order = np.argsort(data['indices'])
+                      indices = data['indices'][order]
+                      labels = data['labels'][order]
+                      probabilities = data['probabilities'][order].astype(np.float64)
+                  if reference_indices is None:
+                      reference_indices, reference_labels = indices, labels
+                  else:
+                      assert np.array_equal(indices, reference_indices)
+                      assert np.array_equal(labels, reference_labels)
+                  predictions[name] = probabilities
+              predictions['ensemble-teacher'] = 0.5 * (
+                  predictions['photon-quantum'] + predictions['photon-classical']
+              )
+              metrics = {
+                  name: metrics_from_probabilities(
+                      reference_labels, probability, ['axion', 'cdm', 'no_sub']
+                  )
+                  for name, probability in predictions.items()
+              }
+              comparisons = {}
+              for candidate, reference in (
+                  ('kd-student', 'photon-quantum'),
+                  ('kd-student', 'photon-classical'),
+                  ('kd-student', 'ensemble-teacher'),
+                  ('kd-student', 'full-q0'),
+                  ('ensemble-teacher', 'photon-quantum'),
+              ):
+                  comparisons[f'{candidate}-vs-{reference}'] = (
+                      stratified_paired_bootstrap_accuracy(
+                          reference_labels,
+                          predictions[candidate],
+                          predictions[reference],
+                          samples=10000,
+                          seed=20260712,
+                      )
+                  )
+              result = {
+                  'scope': 'Model-I development validation only; no test cache opened',
+                  'training_images': 35001,
+                  'student_inference_parameters': 122437,
+                  'training_only_teacher_parameters': 244874,
+                  'student_best_epoch': summary['best_epoch'],
+                  'metrics': metrics,
+                  'comparisons': comparisons,
+              }
+              (root / 'analysis.json').write_text(
+                  json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + '\n'
+              )
+              print('KD_ENSEMBLE50_ANALYSIS', json.dumps(result, sort_keys=True), flush=True)
+              PY
+              chmod -R g+rX ${ROOT}
+            volumeMounts:
+            - name: data-volume
+              mountPath: /workspace/data
+            resources:
+              requests:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+              limits:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+          volumes:
+          - name: data-volume
+            persistentVolumeClaim:
+              claimName: susmered-datavol-1
+  runPolicy:
+    cleanPodPolicy: None
+    suspend: false

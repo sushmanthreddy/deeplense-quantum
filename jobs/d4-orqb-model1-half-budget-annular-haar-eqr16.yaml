@@ -1,0 +1,434 @@
+apiVersion: kubeflow.org/v1
+kind: PyTorchJob
+metadata:
+  name: d4-orqb-m1-half-haar-eqr16-01
+  namespace: sbg-mechanistic-interpretability
+  labels:
+    project: deeplense-quantum
+    dataset: model-i
+    stage: half-budget-annular-haar-eqr16
+spec:
+  nprocPerNode: "1"
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1
+      restartPolicy: Never
+      template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: pytorch
+            image: docker.io/pytorch/pytorch:2.1.2-cuda11.8-cudnn8-runtime
+            command: [bash, -lc]
+            args:
+            - |
+              set -euo pipefail
+              SOURCE_REPO=/workspace/data/repos/deeplense-quantum
+              RUN_REPO=$(mktemp -d /tmp/deeplense-quantum-haar-eqr16-01.XXXXXX)
+              # Fail closed until the final red-team pass pins the aggregate
+              # src/tests digest.  Do not replace this during ordinary edits.
+              EXPECTED_SOURCE_SHA256=3ea86c4a60b4a6c58704207b9dc37a32a96ab12af3cf845d01dbac8834c804dd
+              EXPECTED_BASE_HAAR_SHA256=9850a7d0c53b6332739696a9952b94a85a9ecea9c567fe5e0e85bdeef296b144
+              EXPECTED_MORPH_SHA256=dd4b8d01aeab5347e3c518a4731b30e52a02919fc5a815113d02af1cc19cbc0c
+              EXPECTED_SPATIAL_SHA256=37dc7a2c518beafca3c4570c078012c323451a5327b6dcdc879586d92c8bc9cf
+              EXPECTED_PRIMARY_PREDICTIONS_SHA256=96e375f1004f27e5032341604764126e9cb7f30ee319387da49df088d9b02569
+              EXPECTED_BASE_CONFIG_SHA256=534f5b4226198b364a6432e9849e3e5d22fe824ec713b5bbae01c6776478a13a
+              EXPECTED_BASE_DATA_SHA256=6f8e03e63ad06113d4ab879110e1e0787882fac1e4c8ee6397c2a697e7beef19
+              EXPECTED_BASE_PARAMETERS_SHA256=d032132e8a7339447b0d9d9d5dd512bffdf634dae7fd05afb1c942c42f77225d
+              EXPECTED_BASE_SUMMARY_SHA256=40101740472283f5facef438901439a49843a07ad8b9e31dcc33b971cacd322f
+              EXPECTED_FIXED_NORMALIZATION_SHA256=4f54483b2182984fed687a00fb1a96518891c37314b9ea9204cc47822bb2246a
+              EXPECTED_HAAR_NORMALIZATION_SHA256=9b0121dbec0229b8e2744f0ead0279c3c2af0935869f010528967a6459681193
+              EXPECTED_MORPH_NORMALIZATION_SHA256=848d4848ee4832a02843649a0a79b9284a4333fd7ce673200b4b1f647918dfbf
+              EXPECTED_CACHE_IMAGES_SHA256=c3c639584e0a9e2d6ba369e3fb41ba0451b2170a362ec419fa1182e55d5ce070
+              EXPECTED_CACHE_LABELS_SHA256=3a12100d1df155738b57255e6625ba1287c2d74c5bab53bce2cd0597afe89b17
+              EXPECTED_CACHE_METADATA_SHA256=9f36faff5fc3300b97512b1c29439b2e993888318a31835938749e10fbf12379
+              EXPECTED_CACHE_MANIFEST_SHA256=c04a3c62afebe3f660ffaad4333b6632471a91c6f5f239f84e68b4b94c330025
+              EXPECTED_TRAIN_MEMBERSHIP_SHA256=571d23ced25095cf0cfb57216654f9b7be289b0589a95489a5a815a866aaee71
+              EXPECTED_VAL_MEMBERSHIP_SHA256=454935a294c5bb0f7c66c5b5c61072e469575b1ad68fda9fa3efb057db97ec52
+              test "${EXPECTED_SOURCE_SHA256}" != "__REPLACE_AFTER_REDTEAM__"
+              cp -a ${SOURCE_REPO}/src ${RUN_REPO}/src
+              cp -a ${SOURCE_REPO}/tests ${RUN_REPO}/tests
+              cd ${RUN_REPO}
+              export LC_ALL=C
+              SOURCE_SHA256=$(find src/d4_orqb tests -type f -name '*.py' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+              echo SOURCE_SHA256=${SOURCE_SHA256}
+              test "${SOURCE_SHA256}" = "${EXPECTED_SOURCE_SHA256}"
+              export PYTHONPATH=${RUN_REPO}/src
+              export PYTHONUNBUFFERED=1
+              export OMP_NUM_THREADS=4
+              export MKL_NUM_THREADS=4
+              export CUBLAS_WORKSPACE_CONFIG=:4096:8
+              export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256
+
+              python -m unittest discover -s tests -v
+              nvidia-smi
+              DATA=/workspace/data/datasets/DEEPLENS_DATASETS
+              CACHE=/workspace/data/cache/d4-orqb
+              BASE=/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/reduced-data
+              BASE_RUN=${BASE}/annular-haar50-01/quantum
+              BASE_HAAR=${BASE_RUN}/best.pt
+              PRIMARY_PREDICTIONS=${BASE_RUN}/best_validation_predictions.npz
+              MORPH=${BASE}/morphology-fusion50-01/quantum/best.pt
+              SPATIAL=${BASE}/spatial-stat50-02/quantum/best.pt
+              DEV_CACHE=${CACHE}/model_i_96_v1/development
+              ROOT=${BASE}/annular-haar50-eqr16-01
+              for path in "${BASE_HAAR}" "${PRIMARY_PREDICTIONS}" "${MORPH}" "${SPATIAL}"; do
+                test -f "${path}" && test ! -L "${path}"
+              done
+              for path in config.json data_report.json parameter_report.json summary.json fixed_summary_normalization.json haar_normalization.json morphology_normalization.json; do
+                test -f "${BASE_RUN}/${path}" && test ! -L "${BASE_RUN}/${path}"
+              done
+              for path in images.npy labels.npy metadata.json manifest.csv; do
+                test -f "${DEV_CACHE}/${path}" && test ! -L "${DEV_CACHE}/${path}"
+              done
+              BASE_HAAR_SHA256=$(sha256sum "${BASE_HAAR}" | cut -d' ' -f1)
+              PRIMARY_PREDICTIONS_SHA256=$(sha256sum "${PRIMARY_PREDICTIONS}" | cut -d' ' -f1)
+              MORPH_SHA256=$(sha256sum "${MORPH}" | cut -d' ' -f1)
+              SPATIAL_SHA256=$(sha256sum "${SPATIAL}" | cut -d' ' -f1)
+              test "${BASE_HAAR_SHA256}" = "${EXPECTED_BASE_HAAR_SHA256}"
+              test "${PRIMARY_PREDICTIONS_SHA256}" = "${EXPECTED_PRIMARY_PREDICTIONS_SHA256}"
+              test "${MORPH_SHA256}" = "${EXPECTED_MORPH_SHA256}"
+              test "${SPATIAL_SHA256}" = "${EXPECTED_SPATIAL_SHA256}"
+              test "$(sha256sum "${BASE_RUN}/config.json" | cut -d' ' -f1)" = "${EXPECTED_BASE_CONFIG_SHA256}"
+              test "$(sha256sum "${BASE_RUN}/data_report.json" | cut -d' ' -f1)" = "${EXPECTED_BASE_DATA_SHA256}"
+              test "$(sha256sum "${BASE_RUN}/parameter_report.json" | cut -d' ' -f1)" = "${EXPECTED_BASE_PARAMETERS_SHA256}"
+              test "$(sha256sum "${BASE_RUN}/summary.json" | cut -d' ' -f1)" = "${EXPECTED_BASE_SUMMARY_SHA256}"
+              test "$(sha256sum "${BASE_RUN}/fixed_summary_normalization.json" | cut -d' ' -f1)" = "${EXPECTED_FIXED_NORMALIZATION_SHA256}"
+              test "$(sha256sum "${BASE_RUN}/haar_normalization.json" | cut -d' ' -f1)" = "${EXPECTED_HAAR_NORMALIZATION_SHA256}"
+              test "$(sha256sum "${BASE_RUN}/morphology_normalization.json" | cut -d' ' -f1)" = "${EXPECTED_MORPH_NORMALIZATION_SHA256}"
+              test "$(sha256sum "${DEV_CACHE}/images.npy" | cut -d' ' -f1)" = "${EXPECTED_CACHE_IMAGES_SHA256}"
+              test "$(sha256sum "${DEV_CACHE}/labels.npy" | cut -d' ' -f1)" = "${EXPECTED_CACHE_LABELS_SHA256}"
+              test "$(sha256sum "${DEV_CACHE}/metadata.json" | cut -d' ' -f1)" = "${EXPECTED_CACHE_METADATA_SHA256}"
+              test "$(sha256sum "${DEV_CACHE}/manifest.csv" | cut -d' ' -f1)" = "${EXPECTED_CACHE_MANIFEST_SHA256}"
+              test ! -e "${ROOT}"
+              mkdir -p "${ROOT}"
+              export ROOT SOURCE_SHA256 BASE_HAAR_SHA256 MORPH_SHA256 SPATIAL_SHA256
+              export PRIMARY_PREDICTIONS_SHA256 EXPECTED_TRAIN_MEMBERSHIP_SHA256 EXPECTED_VAL_MEMBERSHIP_SHA256
+              export EXPECTED_CACHE_IMAGES_SHA256 EXPECTED_CACHE_LABELS_SHA256 EXPECTED_CACHE_METADATA_SHA256 EXPECTED_CACHE_MANIFEST_SHA256
+
+              python - <<'PY'
+              import json
+              import os
+              from pathlib import Path
+
+              provenance = {
+                  'source_sha256': os.environ['SOURCE_SHA256'],
+                  'base_haar_checkpoint_sha256': os.environ['BASE_HAAR_SHA256'],
+                  'base_haar_predictions_sha256': os.environ['PRIMARY_PREDICTIONS_SHA256'],
+                  'distillation_teacher_sha256': [
+                      os.environ['MORPH_SHA256'], os.environ['SPATIAL_SHA256']
+                  ],
+                  'development_cache_sha256': {
+                      'images.npy': os.environ['EXPECTED_CACHE_IMAGES_SHA256'],
+                      'labels.npy': os.environ['EXPECTED_CACHE_LABELS_SHA256'],
+                      'metadata.json': os.environ['EXPECTED_CACHE_METADATA_SHA256'],
+                      'manifest.csv': os.environ['EXPECTED_CACHE_MANIFEST_SHA256'],
+                  },
+                  'train_membership_sha256': os.environ['EXPECTED_TRAIN_MEMBERSHIP_SHA256'],
+                  'validation_membership_sha256': os.environ['EXPECTED_VAL_MEMBERSHIP_SHA256'],
+                  'candidate': 'annular-Haar ORQB with D4-tied equatorial quantum measurement bases',
+                  'control': 'identical allocated EQR-16 architecture with all sixteen measurement phases frozen at exact zero',
+                  'architecture_change': 'four tied measurement-basis phases per head: local, R, R2, and S',
+                  'observable': 'P(phi)=cos(phi)X+sin(phi)Y',
+                  'state_preparation_quantum_parameters': 88,
+                  'new_quantum_measurement_parameters': 16,
+                  'allocated_quantum_parameters': 104,
+                  'removed_redundant_classical_parameters': 1,
+                  'classifier_reparameterization': 'three-class bias gauge (beta0,beta1,0), softmax-equivalent to the source bias',
+                  'mixed_precision_replay': 'zero-phase features replay bitwise; float32 and bfloat16 probabilities/argmax are tolerance-verified',
+                  'training_images': 35001,
+                  'inference_parameters': 122610,
+                  'source_checkpoint_limitation': 'the shared base-Haar initializer is a development-validation-selected epoch-17 checkpoint; this is a paired incremental readout ablation',
+                  'predeclared_promotion_correct': 16750,
+                  'predeclared_promotion_macro_auc': 0.992624,
+                  'predeclared_promotion_nll': 0.145003,
+                  'selection_scope': 'Model-I development validation only',
+                  'official_test_opened': False,
+              }
+              root = Path(os.environ['ROOT'])
+              (root / 'provenance.json').write_text(
+                  json.dumps(provenance, indent=2, sort_keys=True) + '\n'
+              )
+              print('PROVENANCE', json.dumps(provenance, sort_keys=True), flush=True)
+              PY
+
+              COMMON="--development-root ${DATA}/Model_I --test-root ${DATA}/Model_I_test --cache-root ${CACHE} --image-size 96 --encoder-variant deep-se-haar-morph --physics-variant base --physics-summary moments-morphology-haar --core quantum --quantum-encoding angle --observable-readout pair --heads 4 --reuploads 2 --equatorial-readout --epochs 20 --patience 8 --validation-interval 1 --batch-size 256 --workers 4 --io-workers 8 --encoder-learning-rate 0.00005 --learning-rate 0.0006 --core-learning-rate 0.001 --weight-decay 0.0001 --label-smoothing 0.02 --dropout 0.10 --photon-noise-probability 0.5 --photon-count-min 2048 --photon-count-max 8192 --max-train-per-class 11667 --train-subset-protocol hash-v1 --seed 0 --split-seed 42 --deterministic --init-full-checkpoint ${BASE_HAAR} --distillation-teacher-checkpoint ${MORPH} --distillation-teacher-checkpoint ${SPATIAL} --distillation-weight 0.70 --distillation-temperature 2.0"
+
+              python -m d4_orqb.train ${COMMON} \
+                --output-dir ${ROOT}/eqr-trainable
+
+              python -m d4_orqb.train ${COMMON} \
+                --freeze-equatorial-readout-at-zero \
+                --output-dir ${ROOT}/eqr-frozen-control
+
+              python - <<'PY'
+              import hashlib
+              import json
+              import math
+              import os
+              from pathlib import Path
+
+              import numpy as np
+              from d4_orqb.evaluate_locked import (
+                  metrics_from_probabilities,
+                  stratified_paired_bootstrap_accuracy,
+              )
+
+              def sha256(path):
+                  return hashlib.sha256(path.read_bytes()).hexdigest()
+
+              root = Path(os.environ['ROOT'])
+              base = root.parent
+              expected_membership = os.environ['EXPECTED_TRAIN_MEMBERSHIP_SHA256']
+              expected_validation = os.environ['EXPECTED_VAL_MEMBERSHIP_SHA256']
+              expected_manifest = os.environ['EXPECTED_CACHE_MANIFEST_SHA256']
+              expected_source_checkpoint = os.environ['BASE_HAAR_SHA256']
+              runs = {
+                  'eqr-trainable': root / 'eqr-trainable',
+                  'eqr-frozen-control': root / 'eqr-frozen-control',
+              }
+              metrics = {}
+              predictions = {}
+              artifacts = {}
+              configs = {}
+              summaries = {}
+              split_arrays = {}
+              reference_indices = reference_labels = None
+              artifact_names = (
+                  'best.pt',
+                  'best_validation_predictions.npz',
+                  'config.json',
+                  'data_report.json',
+                  'parameter_report.json',
+                  'summary.json',
+                  'initialization_report.json',
+                  'distillation_report.json',
+                  'fixed_summary_normalization.json',
+                  'haar_normalization.json',
+                  'morphology_normalization.json',
+                  'split_indices.npz',
+                  'symmetry_audit.json',
+              )
+              for name, run in runs.items():
+                  config = json.loads((run / 'config.json').read_text())
+                  data = json.loads((run / 'data_report.json').read_text())
+                  params = json.loads((run / 'parameter_report.json').read_text())
+                  summary = json.loads((run / 'summary.json').read_text())
+                  initialization = json.loads((run / 'initialization_report.json').read_text())
+                  expected_frozen = name == 'eqr-frozen-control'
+                  assert data['train_size'] == 35001
+                  assert data['validation_size'] == 17504
+                  assert data['train_membership_sha256'] == expected_membership
+                  assert data['development_manifest_sha256'] == expected_manifest
+                  assert data['official_test_cache_opened'] is False
+                  assert data['official_test_locked_during_selection'] is True
+                  assert 'test' not in data
+                  assert config['evaluate_test'] is False
+                  assert config['deterministic'] is True
+                  assert config['equatorial_readout'] is True
+                  assert config['r2_entanglers'] is False
+                  assert config['freeze_equatorial_readout_at_zero'] is expected_frozen
+                  assert config['heads'] == 4 and config['reuploads'] == 2
+                  assert config['epochs'] == 20 and config['patience'] == 8
+                  assert config['seed'] == 0 and config['split_seed'] == 42
+                  assert params['total'] == 122610
+                  assert params['inference_total'] == 122610
+                  assert params['optimization_trainable_total'] == (122594 if expected_frozen else 122610)
+                  assert params['quantum'] == 104
+                  assert params['quantum_state_preparation_trainable'] == 88
+                  assert params['quantum_optimization_trainable'] == (88 if expected_frozen else 104)
+                  assert params['equatorial_readout_trainable'] == 16
+                  assert params['equatorial_readout_optimization_trainable'] == (0 if expected_frozen else 16)
+                  assert params['classifier_bias_trainable'] == 2
+                  assert params['classifier_bias_gauge_degrees'] == 2
+                  assert params['equatorial_readout_frozen_at_zero'] is expected_frozen
+                  assert params['circuit_quantum_trainable'] == 104
+                  assert params['circuit_state_preparation_trainable'] == 88
+                  assert params['circuit_equatorial_readout_trainable'] == 16
+                  assert initialization['checkpoint_sha256'] == expected_source_checkpoint
+                  assert initialization['method'] == 'haar-to-zero-equatorial-readout-gauge-remap'
+                  assert initialization['equatorial_source']['checkpoint_sha256'] == expected_source_checkpoint
+                  assert initialization['equatorial_source']['same_training_membership'] is True
+                  assert initialization['equatorial_source']['same_development_manifest'] is True
+                  replay = initialization['equatorial_readout']['exact_replay']
+                  for mode in ('float32', 'bfloat16_autocast'):
+                      assert replay[mode]['features_bitwise_equal'] is True
+                      assert replay[mode]['predictions_equal'] is True
+                      assert replay[mode]['probabilities_equal_within_tolerance'] is True
+                  assert replay['protected_source_state_bitwise_equal'] is True
+                  assert replay['classifier_bias_gauge_exact'] is True
+                  assert summary['official_test_evaluated'] is False
+                  assert 'test' not in summary
+                  eqr = summary['equatorial_readout']
+                  assert eqr['frozen_at_zero_control'] is expected_frozen
+                  assert eqr['parameters'] == 16
+                  assert eqr['state_preparation_parameters'] == 88
+                  phases = np.asarray(eqr['phases'], dtype=np.float64)
+                  assert phases.shape == (4, 4) and np.isfinite(phases).all()
+                  if expected_frozen:
+                      assert eqr['phase_update_l2'] == 0.0
+                      assert eqr['phase_l2'] == 0.0
+                      assert np.array_equal(phases, np.zeros((4, 4)))
+                  else:
+                      assert eqr['phase_update_l2'] > 0.0 and eqr['phase_l2'] > 0.0
+
+                  with np.load(run / 'split_indices.npz', allow_pickle=False) as split:
+                      split_arrays[name] = {
+                          'train': split['train'].copy(),
+                          'val': split['val'].copy(),
+                      }
+                  prediction_path = run / 'best_validation_predictions.npz'
+                  with np.load(prediction_path, allow_pickle=False) as values:
+                      order = np.argsort(values['indices'])
+                      indices = values['indices'][order]
+                      labels = values['labels'][order]
+                      probabilities = values['probabilities'][order].astype(np.float64)
+                  if reference_indices is None:
+                      reference_indices, reference_labels = indices, labels
+                  else:
+                      assert np.array_equal(indices, reference_indices)
+                      assert np.array_equal(labels, reference_labels)
+                  predictions[name] = probabilities
+                  metrics[name] = metrics_from_probabilities(
+                      labels, probabilities, ['axion', 'cdm', 'no_sub']
+                  )
+                  artifacts[name] = {
+                      artifact: sha256(run / artifact)
+                      for artifact in artifact_names
+                  }
+                  configs[name] = config
+                  summaries[name] = summary
+
+              assert np.array_equal(
+                  split_arrays['eqr-trainable']['train'],
+                  split_arrays['eqr-frozen-control']['train'],
+              )
+              assert np.array_equal(
+                  split_arrays['eqr-trainable']['val'],
+                  split_arrays['eqr-frozen-control']['val'],
+              )
+              from d4_orqb.data import index_membership_sha256
+              assert index_membership_sha256(split_arrays['eqr-trainable']['train']) == expected_membership
+              assert index_membership_sha256(split_arrays['eqr-trainable']['val']) == expected_validation
+
+              ignored = {'output_dir', 'freeze_equatorial_readout_at_zero'}
+              shared_candidate = {
+                  key: value for key, value in configs['eqr-trainable'].items()
+                  if key not in ignored
+              }
+              shared_control = {
+                  key: value for key, value in configs['eqr-frozen-control'].items()
+                  if key not in ignored
+              }
+              assert shared_candidate == shared_control
+
+              primary_path = base / 'annular-haar50-01' / 'quantum' / 'best_validation_predictions.npz'
+              assert sha256(primary_path) == os.environ['PRIMARY_PREDICTIONS_SHA256']
+              with np.load(primary_path, allow_pickle=False) as values:
+                  order = np.argsort(values['indices'])
+                  assert np.array_equal(values['indices'][order], reference_indices)
+                  assert np.array_equal(values['labels'][order], reference_labels)
+                  predictions['primary'] = values['probabilities'][order].astype(np.float64)
+              metrics['primary'] = metrics_from_probabilities(
+                  reference_labels, predictions['primary'], ['axion', 'cdm', 'no_sub']
+              )
+              comparisons = {
+                  reference: stratified_paired_bootstrap_accuracy(
+                      reference_labels,
+                      predictions['eqr-trainable'],
+                      predictions[reference],
+                      samples=100000,
+                      seed=20260731,
+                  )
+                  for reference in ('eqr-frozen-control', 'primary')
+              }
+              candidate_prediction = predictions['eqr-trainable'].argmax(1)
+              control_prediction = predictions['eqr-frozen-control'].argmax(1)
+              candidate_correct = candidate_prediction == reference_labels
+              control_correct = control_prediction == reference_labels
+              candidate_only = int((candidate_correct & ~control_correct).sum())
+              control_only = int((~candidate_correct & control_correct).sum())
+              discordant = candidate_only + control_only
+              if discordant:
+                  tail = sum(
+                      math.comb(discordant, k)
+                      for k in range(min(candidate_only, control_only) + 1)
+                  ) / (2 ** discordant)
+                  mcnemar_p = min(1.0, 2.0 * tail)
+              else:
+                  mcnemar_p = 1.0
+              candidate = metrics['eqr-trainable']
+              correct = int(candidate_correct.sum())
+              passed = (
+                  correct >= 16750
+                  and candidate['macro_auc_ovr'] >= 0.992624
+                  and candidate['nll'] <= 0.145003
+              )
+              result = {
+                  'scope': 'Model-I development validation only; official test unopened',
+                  'causal_claim_scope': 'paired continuation differs only in whether the sixteen allocated equatorial measurement phases are trainable or frozen at zero',
+                  'source_sha256': os.environ['SOURCE_SHA256'],
+                  'base_haar_checkpoint_sha256': expected_source_checkpoint,
+                  'training_images': 35001,
+                  'parameters': 122610,
+                  'allocated_quantum_parameters': 104,
+                  'state_preparation_quantum_parameters': 88,
+                  'new_equatorial_measurement_parameters': 16,
+                  'predeclared_promotion_correct': 16750,
+                  'predeclared_promotion_macro_auc': 0.992624,
+                  'predeclared_promotion_nll': 0.145003,
+                  'passed_predeclared_promotion_gate': passed,
+                  'correct': correct,
+                  'metrics': metrics,
+                  'comparisons': comparisons,
+                  'candidate_only_correct_vs_control': candidate_only,
+                  'control_only_correct_vs_candidate': control_only,
+                  'mcnemar_exact_two_sided_p_vs_control': mcnemar_p,
+                  'best_epochs': {
+                      name: int(summary['best_epoch'])
+                      for name, summary in summaries.items()
+                  },
+                  'equatorial_phase_update_l2': summaries['eqr-trainable']['equatorial_readout']['phase_update_l2'],
+                  'artifacts': artifacts,
+                  'reference_artifacts': {
+                      'primary_predictions_sha256': sha256(primary_path),
+                      'provenance_sha256': sha256(root / 'provenance.json'),
+                  },
+                  'same_initializer_seed_schedule_augmentation': True,
+                  'configs_differ_only_output_and_freeze_flag': True,
+                  'official_test_opened': False,
+              }
+              (root / 'analysis.json').write_text(
+                  json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + '\n'
+              )
+              print('EQR16_ANALYSIS', json.dumps(result, sort_keys=True), flush=True)
+              PY
+            env:
+            - name: XDG_CACHE_HOME
+              value: /workspace/data/cache/xdg
+            - name: TORCH_HOME
+              value: /workspace/data/cache/torch
+            - name: CUBLAS_WORKSPACE_CONFIG
+              value: :4096:8
+            volumeMounts:
+            - name: data-volume
+              mountPath: /workspace/data
+            resources:
+              requests:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+              limits:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+          volumes:
+          - name: data-volume
+            persistentVolumeClaim:
+              claimName: susmered-datavol-1
+  runPolicy:
+    cleanPodPolicy: None
+    suspend: false

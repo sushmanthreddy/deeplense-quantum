@@ -1,0 +1,216 @@
+apiVersion: kubeflow.org/v1
+kind: PyTorchJob
+metadata:
+  name: d4-orqb-m1-half-tinyqteach50-01
+  namespace: sbg-mechanistic-interpretability
+  labels:
+    project: deeplense-quantum
+    dataset: model-i
+    stage: same-subset-full-width-quantum-teacher
+spec:
+  nprocPerNode: "1"
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1
+      template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: pytorch
+            image: docker.io/pytorch/pytorch:2.1.2-cuda11.8-cudnn8-runtime
+            command: [bash, -lc]
+            args:
+            - |
+              set -euo pipefail
+              SOURCE_REPO=/workspace/data/repos/deeplense-quantum
+              RUN_REPO=$(mktemp -d /tmp/deeplense-quantum-tinyqteach50-01.XXXXXX)
+              EXPECTED_SOURCE_SHA256=9affd833a0a750ff0672772a2879c13b06b5257ce94744238bdf3362359b3828
+              EXPECTED_BACKBONE_SHA256=db3143e7a4ef01af070ada30816ec1c63ba09bcf8fe61cb93266d620cc4a9f29
+              cp -a ${SOURCE_REPO}/src ${RUN_REPO}/src
+              cp -a ${SOURCE_REPO}/tests ${RUN_REPO}/tests
+              cd ${RUN_REPO}
+              export LC_ALL=C
+              SOURCE_SHA256=$(find src/d4_orqb tests -type f -name '*.py' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+              echo SOURCE_SHA256=${SOURCE_SHA256}
+              test "${SOURCE_SHA256}" = "${EXPECTED_SOURCE_SHA256}"
+              export PYTHONPATH=${RUN_REPO}/src
+              export PYTHONUNBUFFERED=1
+              export OMP_NUM_THREADS=4
+              export MKL_NUM_THREADS=4
+              export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256
+
+              python -m unittest tests.test_d4_orqb -v
+              nvidia-smi
+              DATA=/workspace/data/datasets/DEEPLENS_DATASETS
+              CACHE=/workspace/data/cache/d4-orqb
+              BASE=/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/reduced-data
+              BACKBONE=${BASE}/teacher50-01/teacher/best.pt
+              ROOT=${BASE}/tiny-quantum-teacher50-01
+              BACKBONE_SHA256=$(sha256sum ${BACKBONE} | cut -d' ' -f1)
+              echo BACKBONE_SHA256=${BACKBONE_SHA256}
+              test "${BACKBONE_SHA256}" = "${EXPECTED_BACKBONE_SHA256}"
+              mkdir -p ${ROOT}
+              export ROOT SOURCE_SHA256 BACKBONE_SHA256
+
+              python - <<'PY'
+              import json
+              import os
+              from pathlib import Path
+
+              root = Path(os.environ['ROOT'])
+              provenance = {
+                  'source_sha256': os.environ['SOURCE_SHA256'],
+                  'source_hash_locale': 'C',
+                  'initial_backbone_sha256': os.environ['BACKBONE_SHA256'],
+                  'role': 'training-only full-width quantum teacher; never deploy under half-budget claim',
+                  'training_images': 35001,
+                  'training_fraction_of_canonical_train': 35001 / 70021,
+                  'additional_training_images_over_student': 0,
+                  'official_test_opened': False,
+              }
+              (root / 'provenance.json').write_text(
+                  json.dumps(provenance, indent=2, sort_keys=True) + '\n'
+              )
+              print('PROVENANCE', json.dumps(provenance, sort_keys=True), flush=True)
+              PY
+
+              python -m d4_orqb.train \
+                --development-root ${DATA}/Model_I \
+                --test-root ${DATA}/Model_I_test \
+                --cache-root ${CACHE} --image-size 96 \
+                --encoder-variant tiny --physics-variant base \
+                --physics-summary moments --core quantum \
+                --quantum-encoding angle --observable-readout pair \
+                --heads 4 --reuploads 2 --epochs 40 --patience 8 \
+                --validation-interval 2 --batch-size 256 --workers 4 --io-workers 8 \
+                --encoder-learning-rate 0.0005 --learning-rate 0.003 \
+                --core-learning-rate 0.005 --weight-decay 0.0001 \
+                --label-smoothing 0.02 --dropout 0.10 \
+                --photon-noise-probability 0.5 \
+                --photon-count-min 2048 --photon-count-max 8192 \
+                --max-train-per-class 11667 --train-subset-protocol hash-v1 \
+                --seed 0 --split-seed 42 --init-backbone-checkpoint ${BACKBONE} \
+                --output-dir ${ROOT}/teacher
+
+              python - <<'PY'
+              import hashlib
+              import json
+              from pathlib import Path
+              import numpy as np
+              from d4_orqb.evaluate_locked import (
+                  metrics_from_probabilities,
+                  stratified_paired_bootstrap_accuracy,
+              )
+
+              root = Path('/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/reduced-data/tiny-quantum-teacher50-01')
+              run = root / 'teacher'
+              reduced = root.parent
+              model_root = reduced.parent
+              expected_membership = '571d23ced25095cf0cfb57216654f9b7be289b0589a95489a5a815a866aaee71'
+              expected_manifest = 'c04a3c62afebe3f660ffaad4333b6632471a91c6f5f239f84e68b4b94c330025'
+              report = json.loads((run / 'data_report.json').read_text())
+              params = json.loads((run / 'parameter_report.json').read_text())
+              config = json.loads((run / 'config.json').read_text())
+              summary = json.loads((run / 'summary.json').read_text())
+              initialization = json.loads((run / 'initialization_report.json').read_text())
+              assert report['train_size'] == 35001
+              assert report['train_membership_sha256'] == expected_membership
+              assert report['development_manifest_sha256'] == expected_manifest
+              assert report['official_test_cache_opened'] is False
+              assert config['evaluate_test'] is False
+              assert config['encoder_variant'] == 'tiny'
+              assert config['photon_noise_probability'] == 0.5
+              assert params['total'] == 245349
+              assert params['quantum'] == 88
+              assert params['encoder'] == 242338
+              assert summary['official_test_evaluated'] is False
+              assert initialization['checkpoint_sha256'] == 'db3143e7a4ef01af070ada30816ec1c63ba09bcf8fe61cb93266d620cc4a9f29'
+
+              paths = {
+                  'tiny-quantum-teacher': run / 'best_validation_predictions.npz',
+                  'mixup-kd-student': reduced / 'subtype-mixup-kd50-01' / 'mixup-kd' / 'best_validation_predictions.npz',
+                  'spatial-stat-quantum': reduced / 'spatial-stat50-02' / 'quantum' / 'best_validation_predictions.npz',
+                  'kd-student': reduced / 'kd-ensemble50-02' / 'student' / 'best_validation_predictions.npz',
+                  'full-q0': model_root / 'full-development-01' / 'quantum' / 'best_validation_predictions.npz',
+              }
+              predictions = {}
+              prediction_sha256 = {}
+              reference_indices = reference_labels = None
+              for name, path in paths.items():
+                  prediction_sha256[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+                  with np.load(path, allow_pickle=False) as data:
+                      order = np.argsort(data['indices'])
+                      indices = data['indices'][order]
+                      labels = data['labels'][order]
+                      probabilities = data['probabilities'][order].astype(np.float64)
+                  if reference_indices is None:
+                      reference_indices, reference_labels = indices, labels
+                  else:
+                      assert np.array_equal(indices, reference_indices)
+                      assert np.array_equal(labels, reference_labels)
+                  predictions[name] = probabilities
+              metrics = {
+                  name: metrics_from_probabilities(
+                      reference_labels, probability, ['axion', 'cdm', 'no_sub']
+                  )
+                  for name, probability in predictions.items()
+              }
+              comparisons = {}
+              for reference in (
+                  'mixup-kd-student',
+                  'spatial-stat-quantum',
+                  'kd-student',
+                  'full-q0',
+              ):
+                  comparisons[f'tiny-quantum-teacher-vs-{reference}'] = (
+                      stratified_paired_bootstrap_accuracy(
+                          reference_labels,
+                          predictions['tiny-quantum-teacher'],
+                          predictions[reference],
+                          samples=10000,
+                          seed=20260716,
+                      )
+                  )
+              result = {
+                  'scope': 'Model-I development validation only; no test cache opened',
+                  'role': 'training-only teacher',
+                  'source_sha256': '9affd833a0a750ff0672772a2879c13b06b5257ce94744238bdf3362359b3828',
+                  'training_images': 35001,
+                  'teacher_parameters': 245349,
+                  'current_deployed_ceiling': 122610,
+                  'passes_current_teacher_gate': (
+                      metrics['tiny-quantum-teacher']['accuracy'] > 0.9535534734917733
+                      and metrics['tiny-quantum-teacher']['macro_auc_ovr'] > 0.9915895330591477
+                  ),
+                  'metrics': metrics,
+                  'comparisons': comparisons,
+                  'prediction_file_sha256': prediction_sha256,
+              }
+              (root / 'analysis.json').write_text(
+                  json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + '\n'
+              )
+              print('TINY_QUANTUM_TEACHER50_ANALYSIS', json.dumps(result, sort_keys=True), flush=True)
+              PY
+              chmod -R g+rX ${ROOT}
+            volumeMounts:
+            - name: data-volume
+              mountPath: /workspace/data
+            resources:
+              requests:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+              limits:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+          volumes:
+          - name: data-volume
+            persistentVolumeClaim:
+              claimName: susmered-datavol-1
+  runPolicy:
+    cleanPodPolicy: None
+    suspend: false

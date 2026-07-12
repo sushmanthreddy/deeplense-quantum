@@ -1,0 +1,226 @@
+apiVersion: kubeflow.org/v1
+kind: PyTorchJob
+metadata:
+  name: d4-orqb-m1-half-haar-qc-01
+  namespace: sbg-mechanistic-interpretability
+  labels:
+    project: deeplense-quantum
+    dataset: model-i
+    stage: half-budget-annular-haar-matched-cores
+spec:
+  nprocPerNode: "1"
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1
+      template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: pytorch
+            image: docker.io/pytorch/pytorch:2.1.2-cuda11.8-cudnn8-runtime
+            command: [bash, -lc]
+            args:
+            - |
+              set -euo pipefail
+              SOURCE_REPO=/workspace/data/repos/deeplense-quantum
+              RUN_REPO=$(mktemp -d /tmp/deeplense-quantum-haar-qc01.XXXXXX)
+              EXPECTED_SOURCE_SHA256=3f97b75e320b9d4361bbed1cae61523abe244771c7e1e0a79af9f2ff4b99efdd
+              EXPECTED_INITIALIZER_SHA256=46b0a2f4e0dc3db8dd9eb9dfc5d55668bb2ec51af0db29d1f6584c769fcbe77c
+              EXPECTED_MORPH_SHA256=dd4b8d01aeab5347e3c518a4731b30e52a02919fc5a815113d02af1cc19cbc0c
+              EXPECTED_SPATIAL_SHA256=37dc7a2c518beafca3c4570c078012c323451a5327b6dcdc879586d92c8bc9cf
+              cp -a ${SOURCE_REPO}/src ${RUN_REPO}/src
+              cp -a ${SOURCE_REPO}/tests ${RUN_REPO}/tests
+              cd ${RUN_REPO}
+              export LC_ALL=C
+              SOURCE_SHA256=$(find src/d4_orqb tests -type f -name '*.py' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+              test "${SOURCE_SHA256}" = "${EXPECTED_SOURCE_SHA256}"
+              export PYTHONPATH=${RUN_REPO}/src
+              export PYTHONUNBUFFERED=1
+              export OMP_NUM_THREADS=4
+              export MKL_NUM_THREADS=4
+              export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256
+
+              python -m unittest discover -s tests -v
+              nvidia-smi
+              DATA=/workspace/data/datasets/DEEPLENS_DATASETS
+              CACHE=/workspace/data/cache/d4-orqb
+              BASE=/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/reduced-data
+              INITIALIZER=${BASE}/morphology-fusion-kd50-01/student/best.pt
+              MORPH=${BASE}/morphology-fusion50-01/quantum/best.pt
+              SPATIAL=${BASE}/spatial-stat50-02/quantum/best.pt
+              ROOT=${BASE}/annular-haar50-matched-cores
+              INITIALIZER_SHA256=$(sha256sum ${INITIALIZER} | cut -d' ' -f1)
+              MORPH_SHA256=$(sha256sum ${MORPH} | cut -d' ' -f1)
+              SPATIAL_SHA256=$(sha256sum ${SPATIAL} | cut -d' ' -f1)
+              test "${INITIALIZER_SHA256}" = "${EXPECTED_INITIALIZER_SHA256}"
+              test "${MORPH_SHA256}" = "${EXPECTED_MORPH_SHA256}"
+              test "${SPATIAL_SHA256}" = "${EXPECTED_SPATIAL_SHA256}"
+              mkdir -p ${ROOT}
+              export ROOT SOURCE_SHA256 INITIALIZER_SHA256 MORPH_SHA256 SPATIAL_SHA256
+
+              python - <<'PY'
+              import json
+              import os
+              from pathlib import Path
+
+              provenance = {
+                  'source_sha256': os.environ['SOURCE_SHA256'],
+                  'initializer_sha256': os.environ['INITIALIZER_SHA256'],
+                  'teacher_sha256': [os.environ['MORPH_SHA256'], os.environ['SPATIAL_SHA256']],
+                  'comparison': 'fresh 88-parameter quantum versus matched classical orbit core',
+                  'shared_non_core_initialization': 'bitwise identical by tested remap, same seed',
+                  'cores_reinitialized_after_checkpoint_remap': True,
+                  'seed': 0,
+                  'training_images': 35001,
+                  'parameters_per_model': 122595,
+                  'selection_scope': 'Model-I development validation only',
+                  'official_test_opened': False,
+                  'predeclared_usable_accuracy_floor': 0.95,
+              }
+              root = Path(os.environ['ROOT'])
+              (root / 'provenance.json').write_text(json.dumps(provenance, indent=2, sort_keys=True) + '\n')
+              print('PROVENANCE', json.dumps(provenance, sort_keys=True), flush=True)
+              PY
+
+              for CORE in quantum classical; do
+                python -m d4_orqb.train \
+                  --development-root ${DATA}/Model_I \
+                  --test-root ${DATA}/Model_I_test \
+                  --cache-root ${CACHE} --image-size 96 \
+                  --encoder-variant deep-se-haar-morph --physics-variant base \
+                  --physics-summary moments-morphology-haar --core ${CORE} \
+                  --quantum-encoding angle --observable-readout pair \
+                  --heads 4 --reuploads 2 --epochs 20 --patience 8 \
+                  --validation-interval 1 --batch-size 256 --workers 4 --io-workers 8 \
+                  --encoder-learning-rate 0.00005 --learning-rate 0.0006 \
+                  --core-learning-rate 0.005 --weight-decay 0.0001 \
+                  --label-smoothing 0.02 --dropout 0.10 \
+                  --photon-noise-probability 0.5 \
+                  --photon-count-min 2048 --photon-count-max 8192 \
+                  --max-train-per-class 11667 --train-subset-protocol hash-v1 \
+                  --seed 0 --split-seed 42 \
+                  --init-full-checkpoint ${INITIALIZER} \
+                  --reinitialize-core-after-init \
+                  --distillation-teacher-checkpoint ${MORPH} \
+                  --distillation-teacher-checkpoint ${SPATIAL} \
+                  --distillation-weight 0.70 --distillation-temperature 2.0 \
+                  --output-dir ${ROOT}/${CORE}
+              done
+
+              python - <<'PY'
+              import hashlib
+              import json
+              from pathlib import Path
+              import numpy as np
+              from d4_orqb.evaluate_locked import (
+                  mcnemar_exact,
+                  metrics_from_probabilities,
+                  stratified_paired_bootstrap_accuracy,
+              )
+
+              root = Path('/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/reduced-data/annular-haar50-matched-cores')
+              expected_membership = '571d23ced25095cf0cfb57216654f9b7be289b0589a95489a5a815a866aaee71'
+              expected_manifest = 'c04a3c62afebe3f660ffaad4333b6632471a91c6f5f239f84e68b4b94c330025'
+              predictions = {}
+              metrics = {}
+              artifacts = {}
+              reference_indices = reference_labels = None
+              for core in ('quantum', 'classical'):
+                  run = root / core
+                  report = json.loads((run / 'data_report.json').read_text())
+                  params = json.loads((run / 'parameter_report.json').read_text())
+                  config = json.loads((run / 'config.json').read_text())
+                  summary = json.loads((run / 'summary.json').read_text())
+                  initialization = json.loads((run / 'initialization_report.json').read_text())
+                  normalization = json.loads((run / 'haar_normalization.json').read_text())
+                  assert report['train_membership_sha256'] == expected_membership
+                  assert report['development_manifest_sha256'] == expected_manifest
+                  assert report['official_test_cache_opened'] is False
+                  assert config['evaluate_test'] is False
+                  assert config['core'] == core
+                  assert config['reinitialize_core_after_init'] is True
+                  assert params['total'] == 122595 and params['core'] == 88
+                  assert params['quantum'] == (88 if core == 'quantum' else 0)
+                  assert summary['official_test_evaluated'] is False
+                  assert initialization['core_reinitialized_after_init'] is True
+                  assert initialization['core_reinitialization']['trainable_parameters'] == 88
+                  assert initialization['core_reinitialization']['restored_exactly'] is True
+                  assert normalization['fit_images'] == 35001 and normalization['fit_views'] == 280008
+                  assert normalization['validation_samples_used'] == 0
+                  assert normalization['official_test_samples_used'] == 0
+                  with np.load(run / 'best_validation_predictions.npz', allow_pickle=False) as data:
+                      order = np.argsort(data['indices'])
+                      indices = data['indices'][order]
+                      labels = data['labels'][order]
+                      probability = data['probabilities'][order].astype(np.float64)
+                  if reference_indices is None:
+                      reference_indices, reference_labels = indices, labels
+                  else:
+                      assert np.array_equal(indices, reference_indices)
+                      assert np.array_equal(labels, reference_labels)
+                  predictions[core] = probability
+                  metrics[core] = metrics_from_probabilities(
+                      labels, probability, ['axion', 'cdm', 'no_sub']
+                  )
+                  artifacts[core] = {
+                      'checkpoint_sha256': hashlib.sha256((run / 'best.pt').read_bytes()).hexdigest(),
+                      'prediction_sha256': hashlib.sha256((run / 'best_validation_predictions.npz').read_bytes()).hexdigest(),
+                      'best_epoch': summary['best_epoch'],
+                  }
+              comparison = stratified_paired_bootstrap_accuracy(
+                  reference_labels,
+                  predictions['quantum'],
+                  predictions['classical'],
+                  samples=100000,
+                  seed=20260725,
+              )
+              exact = mcnemar_exact(
+                  reference_labels, predictions['quantum'], predictions['classical']
+              )
+              usable = min(metrics[name]['accuracy'] for name in metrics) >= 0.95
+              result = {
+                  'scope': 'Model-I development validation only; no test cache opened',
+                  'comparison': 'matched fresh cores with bitwise-identical non-core initialization and same stochastic seed',
+                  'training_images': 35001,
+                  'parameters_per_model': 122595,
+                  'core_trainables_per_model': 88,
+                  'metrics': metrics,
+                  'quantum_minus_classical': comparison,
+                  'mcnemar_exact': exact,
+                  'artifacts': artifacts,
+                  'predeclared_usable_accuracy_floor': 0.95,
+                  'usable_core_comparison': usable,
+                  'quantum_advantage_ci_excludes_zero': bool(usable and comparison['ci95_low'] > 0),
+              }
+              (root / 'analysis.json').write_text(
+                  json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + '\n'
+              )
+              print('ANNULAR_HAAR_MATCHED_CORE_ANALYSIS', json.dumps(result, sort_keys=True), flush=True)
+              PY
+            env:
+            - name: XDG_CACHE_HOME
+              value: /workspace/data/cache/xdg
+            - name: TORCH_HOME
+              value: /workspace/data/cache/torch
+            volumeMounts:
+            - name: data-volume
+              mountPath: /workspace/data
+            resources:
+              requests:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+              limits:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+          volumes:
+          - name: data-volume
+            persistentVolumeClaim:
+              claimName: susmered-datavol-1
+  runPolicy:
+    cleanPodPolicy: None
+    suspend: false

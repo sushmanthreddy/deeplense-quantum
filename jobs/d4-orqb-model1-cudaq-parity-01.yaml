@@ -1,0 +1,226 @@
+apiVersion: kubeflow.org/v1
+kind: PyTorchJob
+metadata:
+  name: d4-orqb-m1-cudaq-parity-02
+  namespace: sbg-mechanistic-interpretability
+  labels:
+    project: deeplense-quantum
+    dataset: model-i
+    stage: cudaq-nvidia-parity
+spec:
+  nprocPerNode: "1"
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1
+      restartPolicy: Never
+      template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: pytorch
+            image: nvcr.io/nvidia/quantum/cuda-quantum@sha256:84901e99f1d83e0abdb7b02f9870cef1fb1122f889e53af5a0af2c6b7fe3596e
+            imagePullPolicy: IfNotPresent
+            command: [bash, -lc]
+            args:
+            - |
+              set -euo pipefail
+
+              SOURCE_REPO=/workspace/data/repos/deeplense-quantum
+              RUN_REPO=$(mktemp -d /tmp/d4-orqb-m1-cudaq-parity-02.XXXXXX)
+              EXPECTED_SOURCE_SHA256=3610d54ec285dd2a560ba2bc1b9799cb629d4f7fa5542266fb42e209b4e64d20
+              FIXTURE=/workspace/data/outputs/deeplense-quantum-cudaq/model-i/spatial-stat-seed0-01/cudaq_fixture.npz
+              REPORT=/workspace/data/outputs/deeplense-quantum-cudaq/model-i/spatial-stat-seed0-01/cudaq_nvidia_parity.json
+
+              test -d "${SOURCE_REPO}/src/d4_orqb"
+              mkdir -p "${RUN_REPO}/src"
+              cp -a "${SOURCE_REPO}/src/d4_orqb" "${RUN_REPO}/src/d4_orqb"
+              cd "${RUN_REPO}"
+
+              export LC_ALL=C
+              SOURCE_SHA256=$(find src/d4_orqb -type f -name '*.py' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+              echo SOURCE_SHA256="${SOURCE_SHA256}"
+              test "${SOURCE_SHA256}" = "${EXPECTED_SOURCE_SHA256}"
+
+              export PYTHONPATH="${RUN_REPO}/src"
+              export PYTHONUNBUFFERED=1
+              export PYTHONHASHSEED=0
+
+              test -f "${FIXTURE}"
+              test ! -L "${FIXTURE}"
+              test -s "${FIXTURE}"
+              test ! -e "${REPORT}"
+              FIXTURE_SHA256_BEFORE=$(sha256sum "${FIXTURE}" | cut -d' ' -f1)
+              export FIXTURE REPORT FIXTURE_SHA256_BEFORE
+
+              nvidia-smi
+              python - <<'PY'
+              import json
+              import os
+              import subprocess
+
+              import cudaq
+
+              gpu_lines = [
+                  line.strip()
+                  for line in subprocess.check_output(
+                      ["nvidia-smi", "-L"], text=True
+                  ).splitlines()
+                  if line.strip()
+              ]
+              assert len(gpu_lines) == 1, gpu_lines
+
+              targets = []
+              get_targets = getattr(cudaq, "get_targets", None)
+              if callable(get_targets):
+                  for target in get_targets():
+                      name = getattr(target, "name", target)
+                      if callable(name):
+                          name = name()
+                      targets.append(str(name))
+
+              assert cudaq.has_target("nvidia")
+              cudaq_gpu_count = int(cudaq.num_available_gpus())
+              assert cudaq_gpu_count == 1, cudaq_gpu_count
+              cudaq.set_target("nvidia")
+              selected = cudaq.get_target()
+              selected_name = getattr(selected, "name", selected)
+              if callable(selected_name):
+                  selected_name = selected_name()
+              selected_name = str(selected_name)
+              assert selected_name == "nvidia", selected_name
+
+              num_qpus = getattr(selected, "num_qpus", None)
+              if callable(num_qpus):
+                  num_qpus = num_qpus()
+              if num_qpus is not None:
+                  num_qpus = int(num_qpus)
+                  assert num_qpus == 1, num_qpus
+
+              version = str(getattr(cudaq, "__version__", "unknown"))
+              assert "0.12.0" in version, version
+              preflight = {
+                  "cudaq_version": version,
+                  "available_targets": targets,
+                  "selected_target": selected_name,
+                  "cudaq_available_gpu_count": cudaq_gpu_count,
+                  "cudaq_target_qpu_count": num_qpus,
+                  "nvidia_smi_gpu_count": len(gpu_lines),
+                  "nvidia_smi_gpus": gpu_lines,
+                  "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
+                  "nvidia_visible_devices": os.environ.get("NVIDIA_VISIBLE_DEVICES"),
+              }
+              print(
+                  "CUDAQ_PREFLIGHT",
+                  json.dumps(preflight, sort_keys=True, allow_nan=False),
+                  flush=True,
+              )
+              PY
+
+              python "${RUN_REPO}/src/d4_orqb/cudaq_backend.py" verify-fixture \
+                --fixture "${FIXTURE}" \
+                --target nvidia \
+                --output "${REPORT}" \
+                --atol 2e-5 \
+                --rtol 2e-5
+
+              test -s "${REPORT}"
+              test "$(sha256sum "${FIXTURE}" | cut -d' ' -f1)" = "${FIXTURE_SHA256_BEFORE}"
+              python - <<'PY'
+              import hashlib
+              import json
+              import math
+              import os
+              from pathlib import Path
+
+              fixture = Path(os.environ["FIXTURE"])
+              report_path = Path(os.environ["REPORT"])
+              report = json.loads(report_path.read_text())
+
+              assert report["status"] == "passed", report
+              assert report["fixture"] == str(fixture.resolve()), report
+              assert report["fixture_sha256"] == os.environ["FIXTURE_SHA256_BEFORE"]
+              assert report["fixture_sha256"] == hashlib.sha256(fixture.read_bytes()).hexdigest()
+              assert report["rtol"] == 2e-5
+              assert report["atol"] == 2e-5
+              assert report["mismatches"] == 0
+              assert report["actual_shape"] == [16, 48], report["actual_shape"]
+              assert report["expected_shape"] == [16, 48], report["expected_shape"]
+              assert report["values_compared"] == 768
+              assert math.isfinite(report["max_abs_error"])
+              assert math.isfinite(report["max_rel_error"])
+
+              metadata = report["fixture_metadata"]
+              assert metadata["schema"] == "d4-orqb-cudaq-parity-v1", metadata
+              assert metadata["split"] == "validation", metadata
+              assert metadata["batch_size"] == 16, metadata
+              assert metadata["heads"] == 4, metadata
+              assert metadata["reuploads"] == 3, metadata
+              assert metadata["n_qubits"] == 8, metadata
+              assert metadata["parameters_per_layer"] == 11, metadata
+              assert metadata["invariants_per_head"] == 12, metadata
+              model = metadata["model_config"]
+              assert model["core"] == "quantum", model
+              assert model["heads"] == 4, model
+              assert model["reuploads"] == 3, model
+              assert model["quantum_encoding"] == "angle", model
+              assert model["observable_readout"] == "pair", model
+              assert model["r2_entanglers"] is False, model
+              assert model["equatorial_readout"] is False, model
+              assert model["meridional_readout"] is False, model
+              assert model["cross_scale_reupload"] is False, model
+
+              target_check = report["target_check"]
+              version = str(target_check["cudaq_version"])
+              assert "0.12.0" in version, version
+              assert target_check["target"]["requested"] == "nvidia", target_check
+              assert str(target_check["target"]["name"]) == "nvidia", target_check
+              if "num_qpus" in target_check["target"]:
+                  assert int(target_check["target"]["num_qpus"]) == 1, target_check
+              assert target_check["nvidia_smi"]["available"] is True, target_check
+              assert len(target_check["nvidia_smi"]["gpus"]) == 1, target_check
+
+              print(
+                  "CUDAQ_PARITY_AUDIT",
+                  json.dumps(
+                      {
+                          "status": report["status"],
+                          "fixture_sha256": report["fixture_sha256"],
+                          "cudaq_version": version,
+                          "target": target_check["target"],
+                          "gpu_count": len(target_check["nvidia_smi"]["gpus"]),
+                          "values_compared": report["values_compared"],
+                          "max_abs_error": report["max_abs_error"],
+                          "max_rel_error": report["max_rel_error"],
+                      },
+                      sort_keys=True,
+                      allow_nan=False,
+                  ),
+                  flush=True,
+              )
+              PY
+              chmod g+r "${REPORT}"
+            env:
+            - name: XDG_CACHE_HOME
+              value: /tmp/xdg
+            volumeMounts:
+            - name: data-volume
+              mountPath: /workspace/data
+            resources:
+              requests:
+                cpu: "2"
+                memory: 8Gi
+                nvidia.com/gpu: "1"
+              limits:
+                cpu: "2"
+                memory: 8Gi
+                nvidia.com/gpu: "1"
+          volumes:
+          - name: data-volume
+            persistentVolumeClaim:
+              claimName: susmered-datavol-1
+  runPolicy:
+    cleanPodPolicy: None
+    suspend: false

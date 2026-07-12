@@ -1,0 +1,66 @@
+apiVersion: kubeflow.org/v1
+kind: PyTorchJob
+metadata:
+  name: d4-orqb-m1-finite-shot-01
+  namespace: sbg-mechanistic-interpretability
+  labels:
+    project: deeplense-quantum
+    dataset: model-i
+    stage: finite-shot-validation
+spec:
+  nprocPerNode: "1"
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1
+      template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: pytorch
+            image: docker.io/pytorch/pytorch:2.1.2-cuda11.8-cudnn8-runtime
+            command: [bash, -lc]
+            args:
+            - |
+              set -euo pipefail
+              cd /workspace/data/repos/deeplense-quantum
+              export PYTHONPATH=/workspace/data/repos/deeplense-quantum/src
+              export PYTHONUNBUFFERED=1
+              export OMP_NUM_THREADS=4
+              export MKL_NUM_THREADS=4
+              export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256
+
+              nvidia-smi
+              df -hT /workspace/data
+
+              python -m d4_orqb.finite_shot \
+                --run-dir /workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/full-development-01/quantum \
+                --development-cache /workspace/data/cache/d4-orqb/model_i_96_v1/development \
+                --output-dir /workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/finite-shot/q0-01 \
+                --batch-size 128 --workers 4 --device cuda --include-ustat
+            env:
+            - name: XDG_CACHE_HOME
+              value: /workspace/data/cache/xdg
+            - name: TORCH_HOME
+              value: /workspace/data/cache/torch
+            volumeMounts:
+            - name: data-volume
+              mountPath: /workspace/data
+            resources:
+              requests:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+              limits:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+          volumes:
+          - name: data-volume
+            persistentVolumeClaim:
+              claimName: susmered-datavol-1
+  runPolicy:
+    cleanPodPolicy: None
+    suspend: false

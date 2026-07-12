@@ -1,0 +1,204 @@
+apiVersion: kubeflow.org/v1
+kind: PyTorchJob
+metadata:
+  name: d4-orqb-m1-half-plaq50-01
+  namespace: sbg-mechanistic-interpretability
+  labels:
+    project: deeplense-quantum
+    dataset: model-i
+    stage: half-budget-strong-schedule-50pct
+spec:
+  nprocPerNode: "1"
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1
+      template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: pytorch
+            image: docker.io/pytorch/pytorch:2.1.2-cuda11.8-cudnn8-runtime
+            command: [bash, -lc]
+            args:
+            - |
+              set -euo pipefail
+              cd /workspace/data/repos/deeplense-quantum
+              export PYTHONPATH=/workspace/data/repos/deeplense-quantum/src
+              export PYTHONUNBUFFERED=1
+              export OMP_NUM_THREADS=4
+              export MKL_NUM_THREADS=4
+              export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256
+
+              nvidia-smi
+              DATA=/workspace/data/datasets/DEEPLENS_DATASETS
+              CACHE=/workspace/data/cache/d4-orqb
+              ROOT=/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/reduced-data/strong50-01
+              CONTEXT=${ROOT}/context/best.pt
+              DATA_COMMON="--development-root ${DATA}/Model_I --test-root ${DATA}/Model_I_test --cache-root ${CACHE} --image-size 96 --encoder-variant micro --physics-variant base --physics-summary moments --heads 4 --reuploads 2 --batch-size 256 --workers 4 --io-workers 8 --max-train-per-class 11667 --train-subset-protocol hash-v1 --seed 0 --split-seed 42"
+              FINAL_COMMON="${DATA_COMMON} --epochs 40 --patience 8 --validation-interval 2 --encoder-learning-rate 0.0005 --learning-rate 0.003 --core-learning-rate 0.005 --init-backbone-checkpoint ${CONTEXT}"
+
+              # q0 used LR=0.004 for scaffold/backbone training and LR=0.0005
+              # only for final-core fine-tuning.  At half the examples, 36
+              # epochs give the same 4,932 optimizer updates as q0's 18.
+              python -m d4_orqb.train ${DATA_COMMON} \
+                --output-dir ${ROOT}/context --core classical --include-context \
+                --observable-readout pair --epochs 36 --patience 6 \
+                --validation-interval 2 --encoder-learning-rate 0.004 \
+                --learning-rate 0.004 --core-learning-rate 0.006
+
+              python -m d4_orqb.train ${FINAL_COMMON} \
+                --output-dir ${ROOT}/pair-quantum --core quantum \
+                --quantum-encoding angle --observable-readout pair
+
+              python -m d4_orqb.train ${FINAL_COMMON} \
+                --output-dir ${ROOT}/pair-classical --core classical \
+                --observable-readout pair
+
+              python -m d4_orqb.train ${FINAL_COMMON} \
+                --output-dir ${ROOT}/plaquette-quantum --core quantum \
+                --quantum-encoding angle --observable-readout plaquette
+
+              python -m d4_orqb.train ${FINAL_COMMON} \
+                --output-dir ${ROOT}/plaquette-classical --core classical \
+                --observable-readout plaquette
+
+              python -m d4_orqb.train ${FINAL_COMMON} \
+                --output-dir ${ROOT}/plaquette-hybrid --core hybrid \
+                --quantum-encoding angle --observable-readout plaquette \
+                --branch-loss-weight 0.25
+
+              python -m d4_orqb.train ${FINAL_COMMON} \
+                --output-dir ${ROOT}/plaquette-classical-fusion \
+                --core classical-fusion --observable-readout plaquette \
+                --branch-loss-weight 0.25
+
+              python - <<'PY'
+              import json
+              from pathlib import Path
+              import numpy as np
+              from d4_orqb.evaluate_locked import (
+                  metrics_from_probabilities,
+                  stratified_paired_bootstrap_accuracy,
+              )
+
+              root = Path('/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/reduced-data/strong50-01')
+              full_q0 = Path('/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/full-development-01/quantum/best_validation_predictions.npz')
+              expected_hash = '571d23ced25095cf0cfb57216654f9b7be289b0589a95489a5a815a866aaee71'
+              expected_parameters = {
+                  'pair-quantum': 122437,
+                  'pair-classical': 122437,
+                  'plaquette-quantum': 122437,
+                  'plaquette-classical': 122437,
+                  'plaquette-hybrid': 122526,
+                  'plaquette-classical-fusion': 122526,
+              }
+              predictions = {}
+              runs = {}
+              reference_indices = reference_labels = None
+              for name in expected_parameters:
+                  run = root / name
+                  summary = json.loads((run / 'summary.json').read_text())
+                  report = json.loads((run / 'data_report.json').read_text())
+                  params = json.loads((run / 'parameter_report.json').read_text())
+                  assert report['train_size'] == 35001
+                  assert report['train_membership_sha256'] == expected_hash
+                  assert report['official_test_cache_opened'] is False
+                  assert params['total'] == expected_parameters[name]
+                  expected_readout = 'pair' if name.startswith('pair-') else 'plaquette'
+                  assert params['observable_readout'] == expected_readout
+                  with np.load(run / 'best_validation_predictions.npz', allow_pickle=False) as data:
+                      order = np.argsort(data['indices'])
+                      indices = data['indices'][order]
+                      labels = data['labels'][order]
+                      probabilities = data['probabilities'][order].astype(np.float64)
+                  if reference_indices is None:
+                      reference_indices, reference_labels = indices, labels
+                  else:
+                      assert np.array_equal(indices, reference_indices)
+                      assert np.array_equal(labels, reference_labels)
+                  predictions[name] = probabilities
+                  runs[name] = {
+                      'parameters': params['total'],
+                      'best_epoch': summary['best_epoch'],
+                      'validation': summary['validation'],
+                      'core_update_l2': summary['core_update_l2'],
+                      'parallel_core': summary.get('parallel_core'),
+                  }
+
+              with np.load(full_q0, allow_pickle=False) as data:
+                  order = np.argsort(data['indices'])
+                  assert np.array_equal(data['indices'][order], reference_indices)
+                  assert np.array_equal(data['labels'][order], reference_labels)
+                  full_q0_probabilities = data['probabilities'][order].astype(np.float64)
+
+              metrics = {
+                  name: metrics_from_probabilities(
+                      reference_labels, probabilities, ['axion', 'cdm', 'no_sub']
+                  )
+                  for name, probabilities in predictions.items()
+              }
+              comparisons = {}
+              comparison_pairs = (
+                  ('plaquette-quantum', 'pair-quantum'),
+                  ('plaquette-classical', 'pair-classical'),
+                  ('plaquette-hybrid', 'plaquette-classical-fusion'),
+                  ('plaquette-quantum', 'plaquette-classical'),
+                  ('pair-quantum', 'pair-classical'),
+              )
+              for candidate, reference in comparison_pairs:
+                  comparisons[f'{candidate}-vs-{reference}'] = (
+                      stratified_paired_bootstrap_accuracy(
+                          reference_labels,
+                          predictions[candidate],
+                          predictions[reference],
+                          samples=10000,
+                          seed=20260712,
+                      )
+                  )
+              for candidate in predictions:
+                  comparisons[f'{candidate}-vs-full-q0'] = (
+                      stratified_paired_bootstrap_accuracy(
+                          reference_labels,
+                          predictions[candidate],
+                          full_q0_probabilities,
+                          samples=10000,
+                          seed=20260712,
+                      )
+                  )
+              result = {
+                  'scope': 'Model-I development validation only; no test cache opened',
+                  'training_images': 35001,
+                  'training_fraction': 35001 / 70021,
+                  'train_membership_sha256': expected_hash,
+                  'runs': runs,
+                  'metrics': metrics,
+                  'comparisons': comparisons,
+              }
+              (root / 'analysis.json').write_text(
+                  json.dumps(result, indent=2, sort_keys=True, allow_nan=False)
+              )
+              print('PLAQUETTE50_ANALYSIS', json.dumps(result, sort_keys=True), flush=True)
+              PY
+              chmod -R g+rX ${ROOT}
+            volumeMounts:
+            - name: data-volume
+              mountPath: /workspace/data
+            resources:
+              requests:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+              limits:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+          volumes:
+          - name: data-volume
+            persistentVolumeClaim:
+              claimName: susmered-datavol-1
+  runPolicy:
+    cleanPodPolicy: None
+    suspend: false

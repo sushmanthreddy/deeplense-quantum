@@ -1,0 +1,82 @@
+apiVersion: kubeflow.org/v1
+kind: PyTorchJob
+metadata:
+  name: d4-orqb-m1-stable-q-1-2
+  namespace: sbg-mechanistic-interpretability
+  labels:
+    project: deeplense-quantum
+    dataset: model-i
+    stage: superseded-continuation-marker
+spec:
+  nprocPerNode: "1"
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1
+      template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: pytorch
+            image: docker.io/pytorch/pytorch:2.1.2-cuda11.8-cudnn8-runtime
+            command: [bash, -lc]
+            args:
+            - |
+              set -euo pipefail
+              echo "SUPERSEDED_BY=d4-orqb-m1-fixed-bb-1-2"
+              echo "NO_TRAINING_PERFORMED"
+              exit 0
+
+              cd /workspace/data/repos/deeplense-quantum
+              export PYTHONPATH=/workspace/data/repos/deeplense-quantum/src
+              export PYTHONUNBUFFERED=1
+              export OMP_NUM_THREADS=4
+              export MKL_NUM_THREADS=4
+              export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256
+
+              nvidia-smi
+              BACKBONE=/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/full-development-01/pretrain-context/best.pt
+              RUN_ROOT=/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/fixed-backbone-replication
+              for SEED in 1 2; do
+                for CORE in quantum classical; do
+                  python -m d4_orqb.train \
+                    --development-root /workspace/data/datasets/DEEPLENS_DATASETS/Model_I \
+                    --test-root /workspace/data/datasets/DEEPLENS_DATASETS/Model_I_test \
+                    --cache-root /workspace/data/cache/d4-orqb \
+                    --output-dir ${RUN_ROOT}/seed-${SEED}/${CORE} \
+                    --image-size 96 --encoder-variant tiny --physics-variant base \
+                    --core ${CORE} --heads 4 --reuploads 2 \
+                    --epochs 20 --patience 7 --batch-size 256 \
+                    --workers 4 --io-workers 8 \
+                    --encoder-learning-rate 0.0005 --learning-rate 0.003 \
+                    --core-learning-rate 0.005 \
+                    --init-backbone-checkpoint ${BACKBONE} \
+                    --seed ${SEED} --split-seed 42
+                done
+              done
+            env:
+            - name: XDG_CACHE_HOME
+              value: /workspace/data/cache/xdg
+            - name: TORCH_HOME
+              value: /workspace/data/cache/torch
+            volumeMounts:
+            - name: data-volume
+              mountPath: /workspace/data
+            resources:
+              requests:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+              limits:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+          volumes:
+          - name: data-volume
+            persistentVolumeClaim:
+              claimName: susmered-datavol-1
+  runPolicy:
+    cleanPodPolicy: None
+    suspend: false

@@ -1,0 +1,259 @@
+apiVersion: kubeflow.org/v1
+kind: PyTorchJob
+metadata:
+  name: d4-orqb-m1-half-haar-fmaxres-01
+  namespace: sbg-mechanistic-interpretability
+  labels:
+    project: deeplense-quantum
+    dataset: model-i
+    stage: half-budget-annular-haar-frozen-max-residual
+spec:
+  nprocPerNode: "1"
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1
+      restartPolicy: Never
+      template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: pytorch
+            image: docker.io/pytorch/pytorch:2.1.2-cuda11.8-cudnn8-runtime
+            command: [bash, -lc]
+            args:
+            - |
+              set -euo pipefail
+              SOURCE_REPO=/workspace/data/repos/deeplense-quantum
+              RUN_REPO=$(mktemp -d /tmp/deeplense-quantum-haar-fmaxres-01.XXXXXX)
+              EXPECTED_SOURCE_SHA256=f543282ddf4e17a34b80c68cc37f28cf9046594a267d3475466d8a0e20da4e6b
+              EXPECTED_BASE_SHA256=9850a7d0c53b6332739696a9952b94a85a9ecea9c567fe5e0e85bdeef296b144
+              EXPECTED_BASE_PREDICTIONS_SHA256=96e375f1004f27e5032341604764126e9cb7f30ee319387da49df088d9b02569
+              EXPECTED_MORPH_SHA256=dd4b8d01aeab5347e3c518a4731b30e52a02919fc5a815113d02af1cc19cbc0c
+              EXPECTED_SPATIAL_SHA256=37dc7a2c518beafca3c4570c078012c323451a5327b6dcdc879586d92c8bc9cf
+              cp -a ${SOURCE_REPO}/src ${RUN_REPO}/src
+              cp -a ${SOURCE_REPO}/tests ${RUN_REPO}/tests
+              cd ${RUN_REPO}
+              export LC_ALL=C
+              SOURCE_SHA256=$(find src/d4_orqb tests -type f -name '*.py' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+              echo SOURCE_SHA256=${SOURCE_SHA256}
+              test "${SOURCE_SHA256}" = "${EXPECTED_SOURCE_SHA256}"
+              export PYTHONPATH=${RUN_REPO}/src
+              export PYTHONUNBUFFERED=1
+              export OMP_NUM_THREADS=4
+              export MKL_NUM_THREADS=4
+              export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256
+
+              python -m unittest discover -s tests -v
+              nvidia-smi
+              DATA=/workspace/data/datasets/DEEPLENS_DATASETS
+              CACHE=/workspace/data/cache/d4-orqb
+              BASE=/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/reduced-data
+              BASE_RUN=${BASE}/annular-haar50-01/quantum
+              BASE_HAAR=${BASE_RUN}/best.pt
+              BASE_PREDICTIONS=${BASE_RUN}/best_validation_predictions.npz
+              MORPH=${BASE}/morphology-fusion50-01/quantum/best.pt
+              SPATIAL=${BASE}/spatial-stat50-02/quantum/best.pt
+              ROOT=${BASE}/annular-haar50-frozen-max-residual-01
+              test ! -e ${ROOT}
+              test "$(sha256sum ${BASE_HAAR} | cut -d' ' -f1)" = "${EXPECTED_BASE_SHA256}"
+              test "$(sha256sum ${BASE_PREDICTIONS} | cut -d' ' -f1)" = "${EXPECTED_BASE_PREDICTIONS_SHA256}"
+              test "$(sha256sum ${MORPH} | cut -d' ' -f1)" = "${EXPECTED_MORPH_SHA256}"
+              test "$(sha256sum ${SPATIAL} | cut -d' ' -f1)" = "${EXPECTED_SPATIAL_SHA256}"
+              mkdir -p ${ROOT}
+              export ROOT SOURCE_SHA256 BASE_HAAR BASE_PREDICTIONS
+
+              python - <<'PY'
+              import json
+              import os
+              from pathlib import Path
+
+              provenance = {
+                  'source_sha256': os.environ['SOURCE_SHA256'],
+                  'candidate': 'frozen annular-Haar ORQB with 15-parameter max-envelope subtype residual',
+                  'optimization_scope': 'only haar_subtype_residual.weight; all 122595 base parameters frozen',
+                  'parent_constraint': 'exact max(axion,cdm) preservation in inference dtype',
+                  'new_trainable_parameters': 15,
+                  'inference_parameters': 122610,
+                  'quantum_parameters': 88,
+                  'training_images': 35001,
+                  'predeclared_promotion_correct': 16750,
+                  'predeclared_promotion_macro_auc': 0.992624,
+                  'predeclared_promotion_nll': 0.145003,
+                  'selection_scope': 'Model-I development validation only',
+                  'official_test_opened': False,
+              }
+              root = Path(os.environ['ROOT'])
+              (root / 'provenance.json').write_text(
+                  json.dumps(provenance, indent=2, sort_keys=True) + '\n'
+              )
+              print('PROVENANCE', json.dumps(provenance, sort_keys=True), flush=True)
+              PY
+
+              python -m d4_orqb.train \
+                --development-root ${DATA}/Model_I \
+                --test-root ${DATA}/Model_I_test \
+                --cache-root ${CACHE} --image-size 96 \
+                --encoder-variant deep-se-haar-morph --physics-variant base \
+                --physics-summary moments-morphology-haar --core quantum \
+                --quantum-encoding angle --observable-readout pair \
+                --heads 4 --reuploads 2 \
+                --haar-subtype-residual --haar-subtype-max-envelope \
+                --freeze-base-for-haar-subtype-residual \
+                --epochs 20 --patience 8 --validation-interval 1 \
+                --batch-size 256 --workers 4 --io-workers 8 \
+                --encoder-learning-rate 0.0 --learning-rate 0.001 \
+                --core-learning-rate 0.0 --weight-decay 0.001 \
+                --label-smoothing 0.02 --dropout 0.10 \
+                --photon-noise-probability 0.5 \
+                --photon-count-min 2048 --photon-count-max 8192 \
+                --max-train-per-class 11667 --train-subset-protocol hash-v1 \
+                --seed 0 --split-seed 42 \
+                --init-full-checkpoint ${BASE_HAAR} \
+                --distillation-teacher-checkpoint ${MORPH} \
+                --distillation-teacher-checkpoint ${SPATIAL} \
+                --distillation-weight 0.70 --distillation-temperature 2.0 \
+                --output-dir ${ROOT}/quantum
+
+              python - <<'PY'
+              import hashlib
+              import json
+              import math
+              import os
+              from pathlib import Path
+
+              import numpy as np
+              from d4_orqb.evaluate_locked import metrics_from_probabilities
+
+              root = Path(os.environ['ROOT'])
+              run = root / 'quantum'
+              report = json.loads((run / 'data_report.json').read_text())
+              params = json.loads((run / 'parameter_report.json').read_text())
+              config = json.loads((run / 'config.json').read_text())
+              summary = json.loads((run / 'summary.json').read_text())
+              initialization = json.loads((run / 'initialization_report.json').read_text())
+              selection = json.loads((run / 'haar_subtype_selection.json').read_text())
+              expected_membership = '571d23ced25095cf0cfb57216654f9b7be289b0589a95489a5a815a866aaee71'
+              expected_manifest = 'c04a3c62afebe3f660ffaad4333b6632471a91c6f5f239f84e68b4b94c330025'
+              assert report['train_size'] == 35001
+              assert report['train_membership_sha256'] == expected_membership
+              assert report['development_manifest_sha256'] == expected_manifest
+              assert report['official_test_cache_opened'] is False
+              assert config['evaluate_test'] is False
+              assert config['haar_subtype_residual'] is True
+              assert config['haar_subtype_max_envelope'] is True
+              assert config['freeze_base_for_haar_subtype_residual'] is True
+              assert params['total'] == 122610
+              assert params['inference_total'] == 122610
+              assert params['optimization_trainable'] == 15
+              assert params['frozen_inference_parameters'] == 122595
+              assert params['quantum'] == 88
+              assert params['base_parameters_and_buffers_bitwise_frozen'] is True
+              assert summary['official_test_evaluated'] is False
+              assert summary['core_update_l2'] == 0.0
+              subtype = summary['haar_subtype_residual']
+              assert subtype['max_preserving_envelope'] is True
+              assert subtype['frozen_base_audit']['bitwise_equal'] is True
+              assert subtype['frozen_base_audit']['drifted_state_tensors'] == 0
+              assert initialization['frozen_base_optimization']['optimized_parameters'] == 15
+              replay = initialization['haar_subtype_residual']['exact_replay']
+              assert replay['exact_logits'] is True
+              assert replay['nonresidual_state_bitwise_equal'] is True
+              assert selection['validation_samples_used'] == 0
+              assert selection['official_test_samples_used'] == 0
+              assert selection['train_membership_sha256'] == expected_membership
+
+              candidate_path = run / 'best_validation_predictions.npz'
+              with np.load(candidate_path, allow_pickle=False) as data:
+                  order = np.argsort(data['indices'])
+                  indices = data['indices'][order]
+                  labels = data['labels'][order]
+                  candidate_probabilities = data['probabilities'][order].astype(np.float64)
+              with np.load(Path(os.environ['BASE_PREDICTIONS']), allow_pickle=False) as data:
+                  order = np.argsort(data['indices'])
+                  base_indices = data['indices'][order]
+                  base_labels = data['labels'][order]
+                  base_probabilities = data['probabilities'][order].astype(np.float64)
+              assert np.array_equal(indices, base_indices)
+              assert np.array_equal(labels, base_labels)
+              candidate_predictions = candidate_probabilities.argmax(1)
+              base_predictions = base_probabilities.argmax(1)
+              assert np.array_equal(candidate_predictions == 2, base_predictions == 2)
+              metrics = metrics_from_probabilities(
+                  labels, candidate_probabilities, ['axion', 'cdm', 'no_sub']
+              )
+              base_metrics = metrics_from_probabilities(
+                  labels, base_probabilities, ['axion', 'cdm', 'no_sub']
+              )
+              correct = int((candidate_predictions == labels).sum())
+              base_correct = int((base_predictions == labels).sum())
+              candidate_only = int(((candidate_predictions == labels) & (base_predictions != labels)).sum())
+              base_only = int(((candidate_predictions != labels) & (base_predictions == labels)).sum())
+              discordant = candidate_only + base_only
+              if discordant:
+                  tail = sum(math.comb(discordant, k) for k in range(min(candidate_only, base_only) + 1)) / (2 ** discordant)
+                  p_value = min(1.0, 2.0 * tail)
+              else:
+                  p_value = 1.0
+              passed = (
+                  correct >= 16750
+                  and metrics['macro_auc_ovr'] >= 0.992624
+                  and metrics['nll'] <= 0.145003
+              )
+              result = {
+                  'scope': 'Model-I development validation only; locked test unopened',
+                  'training_images': 35001,
+                  'parameters': 122610,
+                  'optimized_parameters': 15,
+                  'quantum_parameters': 88,
+                  'frozen_base_bitwise_equal': True,
+                  'no_sub_membership_exact_vs_primary_saved_predictions': True,
+                  'predeclared_promotion_correct': 16750,
+                  'predeclared_promotion_macro_auc': 0.992624,
+                  'predeclared_promotion_nll': 0.145003,
+                  'passed_predeclared_promotion_gate': passed,
+                  'correct': correct,
+                  'base_correct': base_correct,
+                  'candidate_only_correct': candidate_only,
+                  'base_only_correct': base_only,
+                  'mcnemar_exact_two_sided_p': p_value,
+                  'metrics': metrics,
+                  'base_metrics': base_metrics,
+                  'best_epoch': summary['best_epoch'],
+                  'residual_weight_l2': subtype['weight_l2'],
+                  'checkpoint_sha256': hashlib.sha256((run / 'best.pt').read_bytes()).hexdigest(),
+                  'prediction_sha256': hashlib.sha256(candidate_path.read_bytes()).hexdigest(),
+                  'source_sha256': os.environ['SOURCE_SHA256'],
+                  'official_test_opened': False,
+              }
+              (root / 'analysis.json').write_text(
+                  json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + '\n'
+              )
+              print('FROZEN_MAX_RESIDUAL_ANALYSIS', json.dumps(result, sort_keys=True), flush=True)
+              PY
+            env:
+            - name: XDG_CACHE_HOME
+              value: /workspace/data/cache/xdg
+            - name: TORCH_HOME
+              value: /workspace/data/cache/torch
+            volumeMounts:
+            - name: data-volume
+              mountPath: /workspace/data
+            resources:
+              requests:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+              limits:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+          volumes:
+          - name: data-volume
+            persistentVolumeClaim:
+              claimName: susmered-datavol-1
+  runPolicy:
+    cleanPodPolicy: None
+    suspend: false

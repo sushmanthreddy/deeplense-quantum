@@ -1,0 +1,303 @@
+apiVersion: kubeflow.org/v1
+kind: PyTorchJob
+metadata:
+  name: d4-orqb-m1-half-haar-oofkd-01
+  namespace: sbg-mechanistic-interpretability
+  labels:
+    project: deeplense-quantum
+    dataset: model-i
+    stage: half-budget-annular-haar-oof-kd
+spec:
+  nprocPerNode: "1"
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1
+      restartPolicy: Never
+      template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: pytorch
+            image: docker.io/pytorch/pytorch:2.1.2-cuda11.8-cudnn8-runtime
+            command: [bash, -lc]
+            args:
+            - |
+              set -euo pipefail
+              SOURCE_REPO=/workspace/data/repos/deeplense-quantum
+              RUN_REPO=$(mktemp -d /tmp/deeplense-quantum-haar-oofkd-01.XXXXXX)
+              EXPECTED_SOURCE_SHA256=a3bcf96d588e302283036cacb0d69c6404d5282a4ee3ed3bf755309db083dea5
+              EXPECTED_INITIALIZER_SHA256=46b0a2f4e0dc3db8dd9eb9dfc5d55668bb2ec51af0db29d1f6584c769fcbe77c
+              EXPECTED_OOF_ARTIFACT_SHA256=f4b3f00c5cf29537a794f954c81012206ee11090e09c761ff321e590a690f5a4
+              EXPECTED_OOF_REPORT_SHA256=d01e5992a24e19088ba1fba409145031035d1ca71800c7d2fb384b589cda9a3c
+              cp -a ${SOURCE_REPO}/src ${RUN_REPO}/src
+              cp -a ${SOURCE_REPO}/tests ${RUN_REPO}/tests
+              cd ${RUN_REPO}
+              export LC_ALL=C
+              SOURCE_SHA256=$(find src/d4_orqb tests -type f -name '*.py' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+              echo SOURCE_SHA256=${SOURCE_SHA256}
+              test "${SOURCE_SHA256}" = "${EXPECTED_SOURCE_SHA256}"
+              export PYTHONPATH=${RUN_REPO}/src
+              export PYTHONUNBUFFERED=1
+              export OMP_NUM_THREADS=4
+              export MKL_NUM_THREADS=4
+              export CUBLAS_WORKSPACE_CONFIG=:4096:8
+              export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256
+
+              python -m unittest discover -s tests -v
+              nvidia-smi
+              DATA=/workspace/data/datasets/DEEPLENS_DATASETS
+              CACHE=/workspace/data/cache/d4-orqb
+              BASE=/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/reduced-data
+              INITIALIZER=${BASE}/morphology-fusion-kd50-01/student/best.pt
+              OOF_ROOT=${BASE}/oof-teachers50-01
+              OOF_ARTIFACT=${OOF_ROOT}/oof_targets.npz
+              OOF_REPORT=${OOF_ROOT}/oof_targets.json
+              ROOT=${BASE}/annular-haar50-oof-kd-01
+              test -f "${INITIALIZER}" && test ! -L "${INITIALIZER}"
+              test "$(sha256sum "${INITIALIZER}" | cut -d' ' -f1)" = "${EXPECTED_INITIALIZER_SHA256}"
+              test -f "${OOF_ARTIFACT}" && test ! -L "${OOF_ARTIFACT}"
+              test -f "${OOF_REPORT}" && test ! -L "${OOF_REPORT}"
+              OOF_SHA256=$(sha256sum "${OOF_ARTIFACT}" | cut -d' ' -f1)
+              OOF_REPORT_SHA256=$(sha256sum "${OOF_REPORT}" | cut -d' ' -f1)
+              test "${OOF_SHA256}" = "${EXPECTED_OOF_ARTIFACT_SHA256}"
+              test "${OOF_REPORT_SHA256}" = "${EXPECTED_OOF_REPORT_SHA256}"
+              export ROOT SOURCE_SHA256 OOF_SHA256 OOF_REPORT_SHA256 OOF_ARTIFACT OOF_REPORT
+
+              python - <<'PY'
+              import json
+              import os
+              from pathlib import Path
+
+              report = json.loads(Path(os.environ['OOF_REPORT']).read_text())
+              assert report['artifact_sha256'] == os.environ['OOF_SHA256']
+              assert report['samples'] == 35001
+              assert report['train_membership_sha256'] == '571d23ced25095cf0cfb57216654f9b7be289b0589a95489a5a815a866aaee71'
+              assert report['canonical_development_validation_samples_used'] == 0
+              assert report['official_test_samples_used'] == 0
+              PY
+
+              test ! -e "${ROOT}"
+              mkdir -p "${ROOT}"
+
+              python - <<'PY'
+              import json
+              import os
+              from pathlib import Path
+
+              report = json.loads(Path(os.environ['OOF_REPORT']).read_text())
+              assert report['artifact_sha256'] == os.environ['OOF_SHA256']
+              record = {
+                  'source_sha256': os.environ['SOURCE_SHA256'],
+                  'candidate': 'incremental correctness-gated OOF-KD continuation of the 122595-parameter annular-Haar ORQB from a shared initializer',
+                  'control': 'incremental supervised-CE continuation from the same initializer, seed, schedule, augmentation, and fixed final epoch',
+                  'initializer_sha256': '46b0a2f4e0dc3db8dd9eb9dfc5d55668bb2ec51af0db29d1f6584c769fcbe77c',
+                  'initializer_provenance_limitation': 'the shared morphology-KD initializer and its teachers used this same half-training membership and validation-selected checkpoints; the paired comparison isolates only the incremental OOF-KD continuation, while absolute validation performance is exploratory',
+                  'oof_artifact_sha256': os.environ['OOF_SHA256'],
+                  'oof_report_sha256': os.environ['OOF_REPORT_SHA256'],
+                  'student_training_images': 35001,
+                  'inference_parameters': 122595,
+                  'quantum_parameters': 88,
+                  'fixed_student_epoch': 20,
+                  'validation_schedule': 'no intermediate student checkpoint selection; the fixed epoch-20 state is evaluated and then replayed for final summary and symmetry audit',
+                  'predeclared_promotion_correct': 16784,
+                  'predeclared_promotion_macro_auc': 0.992624,
+                  'predeclared_promotion_nll': 0.145003,
+                  'official_test_opened': False,
+              }
+              root = Path(os.environ['ROOT'])
+              (root / 'provenance.json').write_text(
+                  json.dumps(record, indent=2, sort_keys=True) + '\n'
+              )
+              print('PROVENANCE', json.dumps(record, sort_keys=True), flush=True)
+              PY
+
+              COMMON="--development-root ${DATA}/Model_I --test-root ${DATA}/Model_I_test --cache-root ${CACHE} --image-size 96 --encoder-variant deep-se-haar-morph --physics-variant base --physics-summary moments-morphology-haar --core quantum --quantum-encoding angle --observable-readout pair --heads 4 --reuploads 2 --epochs 20 --patience 21 --validation-interval 20 --fixed-final-validation-only --batch-size 256 --workers 4 --io-workers 8 --encoder-learning-rate 0.00005 --learning-rate 0.0006 --core-learning-rate 0.001 --weight-decay 0.0001 --label-smoothing 0.02 --dropout 0.10 --photon-noise-probability 0.5 --photon-count-min 2048 --photon-count-max 8192 --max-train-per-class 11667 --train-subset-protocol hash-v1 --seed 0 --split-seed 42 --deterministic --init-full-checkpoint ${INITIALIZER}"
+
+              python -m d4_orqb.train ${COMMON} \
+                --oof-distillation-artifact ${OOF_ARTIFACT} \
+                --oof-distillation-report ${OOF_REPORT} \
+                --distillation-weight 0.70 --distillation-temperature 2.0 \
+                --output-dir ${ROOT}/oof-student
+
+              python -m d4_orqb.train ${COMMON} \
+                --output-dir ${ROOT}/ce-control
+
+              python - <<'PY'
+              import hashlib
+              import json
+              import math
+              import os
+              from pathlib import Path
+
+              import numpy as np
+              from d4_orqb.evaluate_locked import (
+                  metrics_from_probabilities,
+                  stratified_paired_bootstrap_accuracy,
+              )
+
+              root = Path(os.environ['ROOT'])
+              base = root.parent
+              expected_membership = '571d23ced25095cf0cfb57216654f9b7be289b0589a95489a5a815a866aaee71'
+              expected_manifest = 'c04a3c62afebe3f660ffaad4333b6632471a91c6f5f239f84e68b4b94c330025'
+              runs = {'oof-student': root / 'oof-student', 'ce-control': root / 'ce-control'}
+              predictions = {}
+              metrics = {}
+              artifacts = {}
+              reference_indices = reference_labels = None
+              configs = {}
+              for name, run in runs.items():
+                  config = json.loads((run / 'config.json').read_text())
+                  data = json.loads((run / 'data_report.json').read_text())
+                  params = json.loads((run / 'parameter_report.json').read_text())
+                  summary = json.loads((run / 'summary.json').read_text())
+                  history = json.loads((run / 'history.json').read_text())
+                  initialization = json.loads((run / 'initialization_report.json').read_text())
+                  assert data['train_size'] == 35001
+                  assert data['train_membership_sha256'] == expected_membership
+                  assert data['development_manifest_sha256'] == expected_manifest
+                  assert data['official_test_cache_opened'] is False
+                  assert config['evaluate_test'] is False
+                  assert config['fixed_final_validation_only'] is True
+                  assert config['deterministic'] is True
+                  assert config['epochs'] == 20 and config['patience'] == 21
+                  assert params['total'] == 122595 and params['quantum'] == 88
+                  assert params['haar_subtype_residual_trainable'] == 0
+                  assert params['dispersion_gate_trainable'] == 0
+                  assert params['shared_late_refinement_gate_trainable'] == 0
+                  assert summary['best_epoch'] == 20
+                  assert summary['official_test_evaluated'] is False
+                  assert all(item['validation'] is None for item in history[:19])
+                  assert history[19]['validation'] is not None
+                  assert initialization['checkpoint_sha256'] == '46b0a2f4e0dc3db8dd9eb9dfc5d55668bb2ec51af0db29d1f6584c769fcbe77c'
+                  assert initialization['method'] == 'morphology-kd-to-annular-haar-exact-remap'
+                  prediction_path = run / 'best_validation_predictions.npz'
+                  with np.load(prediction_path, allow_pickle=False) as values:
+                      order = np.argsort(values['indices'])
+                      indices = values['indices'][order]
+                      labels = values['labels'][order]
+                      probabilities = values['probabilities'][order].astype(np.float64)
+                  if reference_indices is None:
+                      reference_indices, reference_labels = indices, labels
+                  else:
+                      assert np.array_equal(indices, reference_indices)
+                      assert np.array_equal(labels, reference_labels)
+                  predictions[name] = probabilities
+                  metrics[name] = metrics_from_probabilities(
+                      labels, probabilities, ['axion', 'cdm', 'no_sub']
+                  )
+                  artifacts[name] = {
+                      'checkpoint_sha256': hashlib.sha256((run / 'best.pt').read_bytes()).hexdigest(),
+                      'prediction_sha256': hashlib.sha256(prediction_path.read_bytes()).hexdigest(),
+                  }
+                  configs[name] = config
+
+              distillation = json.loads((runs['oof-student'] / 'distillation_report.json').read_text())
+              assert distillation['artifact_sha256'] == os.environ['OOF_SHA256']
+              assert distillation['report_sha256'] == os.environ['OOF_REPORT_SHA256']
+              assert distillation['canonical_development_validation_samples_used_for_targets'] == 0
+              assert distillation['official_test_opened'] is False
+              assert distillation['gate_uses_training_label'] is True
+              assert distillation['ungated_rows'] == 'full supervised CE only'
+              assert not (runs['ce-control'] / 'distillation_report.json').exists()
+              ignored = {
+                  'output_dir', 'oof_distillation_artifact', 'oof_distillation_report',
+                  'distillation_weight', 'distillation_temperature'
+              }
+              shared_oof = {k: v for k, v in configs['oof-student'].items() if k not in ignored}
+              shared_control = {k: v for k, v in configs['ce-control'].items() if k not in ignored}
+              assert shared_oof == shared_control
+
+              primary_path = base / 'annular-haar50-01' / 'quantum' / 'best_validation_predictions.npz'
+              with np.load(primary_path, allow_pickle=False) as values:
+                  order = np.argsort(values['indices'])
+                  assert np.array_equal(values['indices'][order], reference_indices)
+                  assert np.array_equal(values['labels'][order], reference_labels)
+                  predictions['primary'] = values['probabilities'][order].astype(np.float64)
+              metrics['primary'] = metrics_from_probabilities(
+                  reference_labels, predictions['primary'], ['axion', 'cdm', 'no_sub']
+              )
+              comparisons = {
+                  reference: stratified_paired_bootstrap_accuracy(
+                      reference_labels,
+                      predictions['oof-student'],
+                      predictions[reference],
+                      samples=100000,
+                      seed=20260728,
+                  )
+                  for reference in ('ce-control', 'primary')
+              }
+              candidate_predictions = predictions['oof-student'].argmax(1)
+              control_predictions = predictions['ce-control'].argmax(1)
+              candidate_only = int(((candidate_predictions == reference_labels) & (control_predictions != reference_labels)).sum())
+              control_only = int(((candidate_predictions != reference_labels) & (control_predictions == reference_labels)).sum())
+              discordant = candidate_only + control_only
+              if discordant:
+                  tail = sum(math.comb(discordant, k) for k in range(min(candidate_only, control_only) + 1)) / (2 ** discordant)
+                  mcnemar_p = min(1.0, 2.0 * tail)
+              else:
+                  mcnemar_p = 1.0
+              candidate = metrics['oof-student']
+              correct = int((candidate_predictions == reference_labels).sum())
+              passed = (
+                  correct >= 16784
+                  and candidate['macro_auc_ovr'] >= 0.992624
+                  and candidate['nll'] <= 0.145003
+              )
+              result = {
+                  'scope': 'Model-I development validation; no intermediate student checkpoint selection; fixed-final state replayed for reporting; test unopened',
+                  'causal_claim_scope': 'paired candidate/control comparison isolates incremental OOF-KD continuation from a shared validation-selected morphology-KD initializer; absolute validation performance is exploratory',
+                  'source_sha256': os.environ['SOURCE_SHA256'],
+                  'oof_artifact_sha256': os.environ['OOF_SHA256'],
+                  'oof_report_sha256': os.environ['OOF_REPORT_SHA256'],
+                  'training_images': 35001,
+                  'parameters': 122595,
+                  'quantum_parameters': 88,
+                  'fixed_epoch': 20,
+                  'predeclared_promotion_correct': 16784,
+                  'predeclared_promotion_macro_auc': 0.992624,
+                  'predeclared_promotion_nll': 0.145003,
+                  'passed_predeclared_promotion_gate': passed,
+                  'correct': correct,
+                  'metrics': metrics,
+                  'comparisons': comparisons,
+                  'candidate_only_correct_vs_control': candidate_only,
+                  'control_only_correct_vs_candidate': control_only,
+                  'mcnemar_exact_two_sided_p_vs_control': mcnemar_p,
+                  'artifacts': artifacts,
+                  'same_initializer_seed_schedule_augmentation': True,
+                  'official_test_opened': False,
+              }
+              (root / 'analysis.json').write_text(
+                  json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + '\n'
+              )
+              print('OOF_STUDENT_ANALYSIS', json.dumps(result, sort_keys=True), flush=True)
+              PY
+            env:
+            - name: XDG_CACHE_HOME
+              value: /workspace/data/cache/xdg
+            - name: TORCH_HOME
+              value: /workspace/data/cache/torch
+            - name: CUBLAS_WORKSPACE_CONFIG
+              value: :4096:8
+            volumeMounts:
+            - name: data-volume
+              mountPath: /workspace/data
+            resources:
+              requests:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+              limits:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+          volumes:
+          - name: data-volume
+            persistentVolumeClaim:
+              claimName: susmered-datavol-1
+  runPolicy:
+    cleanPodPolicy: None
+    suspend: false

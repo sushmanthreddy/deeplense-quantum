@@ -1,0 +1,211 @@
+apiVersion: kubeflow.org/v1
+kind: PyTorchJob
+metadata:
+  name: d4-orqb-m1-half-haar-disp-02
+  namespace: sbg-mechanistic-interpretability
+  labels:
+    project: deeplense-quantum
+    dataset: model-i
+    stage: half-budget-annular-haar-dispersion
+spec:
+  nprocPerNode: "1"
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1
+      template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: pytorch
+            image: docker.io/pytorch/pytorch:2.1.2-cuda11.8-cudnn8-runtime
+            command: [bash, -lc]
+            args:
+            - |
+              set -euo pipefail
+              SOURCE_REPO=/workspace/data/repos/deeplense-quantum
+              RUN_REPO=$(mktemp -d /tmp/deeplense-quantum-haar-disp-02.XXXXXX)
+              EXPECTED_SOURCE_SHA256=e4bf75411539e96a04a8e9871f625d95894a69a9f6e2c79c8e57eb2395e9cca7
+              EXPECTED_INITIALIZER_SHA256=46b0a2f4e0dc3db8dd9eb9dfc5d55668bb2ec51af0db29d1f6584c769fcbe77c
+              EXPECTED_MORPH_SHA256=dd4b8d01aeab5347e3c518a4731b30e52a02919fc5a815113d02af1cc19cbc0c
+              EXPECTED_SPATIAL_SHA256=37dc7a2c518beafca3c4570c078012c323451a5327b6dcdc879586d92c8bc9cf
+              cp -a ${SOURCE_REPO}/src ${RUN_REPO}/src
+              cp -a ${SOURCE_REPO}/tests ${RUN_REPO}/tests
+              cd ${RUN_REPO}
+              export LC_ALL=C
+              SOURCE_SHA256=$(find src/d4_orqb tests -type f -name '*.py' -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+              echo SOURCE_SHA256=${SOURCE_SHA256}
+              test "${SOURCE_SHA256}" = "${EXPECTED_SOURCE_SHA256}"
+              export PYTHONPATH=${RUN_REPO}/src
+              export PYTHONUNBUFFERED=1
+              export OMP_NUM_THREADS=4
+              export MKL_NUM_THREADS=4
+              export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256
+
+              python -m unittest discover -s tests -v
+              nvidia-smi
+              DATA=/workspace/data/datasets/DEEPLENS_DATASETS
+              CACHE=/workspace/data/cache/d4-orqb
+              BASE=/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/reduced-data
+              INITIALIZER=${BASE}/morphology-fusion-kd50-01/student/best.pt
+              MORPH=${BASE}/morphology-fusion50-01/quantum/best.pt
+              SPATIAL=${BASE}/spatial-stat50-02/quantum/best.pt
+              ROOT=${BASE}/annular-haar50-tied-dispersion-02
+              INITIALIZER_SHA256=$(sha256sum ${INITIALIZER} | cut -d' ' -f1)
+              MORPH_SHA256=$(sha256sum ${MORPH} | cut -d' ' -f1)
+              SPATIAL_SHA256=$(sha256sum ${SPATIAL} | cut -d' ' -f1)
+              test "${INITIALIZER_SHA256}" = "${EXPECTED_INITIALIZER_SHA256}"
+              test "${MORPH_SHA256}" = "${EXPECTED_MORPH_SHA256}"
+              test "${SPATIAL_SHA256}" = "${EXPECTED_SPATIAL_SHA256}"
+              mkdir -p ${ROOT}
+              export ROOT SOURCE_SHA256 INITIALIZER_SHA256 MORPH_SHA256 SPATIAL_SHA256
+
+              python - <<'PY'
+              import json
+              import os
+              from pathlib import Path
+
+              provenance = {
+                  'source_sha256': os.environ['SOURCE_SHA256'],
+                  'initializer_sha256': os.environ['INITIALIZER_SHA256'],
+                  'distillation_teacher_sha256': [
+                      os.environ['MORPH_SHA256'], os.environ['SPATIAL_SHA256']
+                  ],
+                  'candidate': 'annular-Haar ORQB with tied final-map mean-dispersion angle projection',
+                  'new_trainable_parameters': 8,
+                  'new_parameter_initialization': 'all-zero exact functional replay',
+                  'dispersion_path': 'final-map std through tied encoder mean columns into core angles only',
+                  'training_images': 35001,
+                  'inference_parameter_ceiling': 245221 // 2,
+                  'predeclared_promotion_correct': 16750,
+                  'predeclared_promotion_macro_auc': 0.992624,
+                  'predeclared_promotion_nll': 0.145003,
+                  'selection_scope': 'Model-I development validation only',
+                  'official_test_opened': False,
+                  'retry_of': 'd4-orqb-m1-half-haar-disp-01',
+                  'retry_reason': 'first attempt failed closed before tests because the expected aggregate source hash used non-C locale ordering',
+              }
+              root = Path(os.environ['ROOT'])
+              (root / 'provenance.json').write_text(
+                  json.dumps(provenance, indent=2, sort_keys=True) + '\n'
+              )
+              print('PROVENANCE', json.dumps(provenance, sort_keys=True), flush=True)
+              PY
+
+              python -m d4_orqb.train \
+                --development-root ${DATA}/Model_I \
+                --test-root ${DATA}/Model_I_test \
+                --cache-root ${CACHE} --image-size 96 \
+                --encoder-variant deep-se-haar-morph --physics-variant base \
+                --physics-summary moments-morphology-haar --core quantum \
+                --quantum-encoding angle --observable-readout pair \
+                --heads 4 --reuploads 2 --tied-mean-dispersion \
+                --epochs 20 --patience 8 --validation-interval 1 \
+                --batch-size 256 --workers 4 --io-workers 8 \
+                --encoder-learning-rate 0.00005 --learning-rate 0.0006 \
+                --core-learning-rate 0.001 --weight-decay 0.0001 \
+                --label-smoothing 0.02 --dropout 0.10 \
+                --photon-noise-probability 0.5 \
+                --photon-count-min 2048 --photon-count-max 8192 \
+                --max-train-per-class 11667 --train-subset-protocol hash-v1 \
+                --seed 0 --split-seed 42 \
+                --init-full-checkpoint ${INITIALIZER} \
+                --distillation-teacher-checkpoint ${MORPH} \
+                --distillation-teacher-checkpoint ${SPATIAL} \
+                --distillation-weight 0.70 --distillation-temperature 2.0 \
+                --output-dir ${ROOT}/quantum
+
+              python - <<'PY'
+              import hashlib
+              import json
+              from pathlib import Path
+              import numpy as np
+              from d4_orqb.evaluate_locked import metrics_from_probabilities
+
+              root = Path('/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/reduced-data/annular-haar50-tied-dispersion-02')
+              run = root / 'quantum'
+              report = json.loads((run / 'data_report.json').read_text())
+              params = json.loads((run / 'parameter_report.json').read_text())
+              config = json.loads((run / 'config.json').read_text())
+              summary = json.loads((run / 'summary.json').read_text())
+              initialization = json.loads((run / 'initialization_report.json').read_text())
+              expected_membership = '571d23ced25095cf0cfb57216654f9b7be289b0589a95489a5a815a866aaee71'
+              expected_manifest = 'c04a3c62afebe3f660ffaad4333b6632471a91c6f5f239f84e68b4b94c330025'
+              assert report['train_size'] == 35001
+              assert report['train_membership_sha256'] == expected_membership
+              assert report['development_manifest_sha256'] == expected_manifest
+              assert report['official_test_cache_opened'] is False
+              assert config['evaluate_test'] is False
+              assert config['tied_mean_dispersion'] is True
+              assert params['total'] == 122603 <= 122610
+              assert params['quantum'] == 88
+              assert params['dispersion_gate_trainable'] == 8
+              assert params['tied_mean_dispersion'] is True
+              assert summary['official_test_evaluated'] is False
+              tied = initialization['tied_mean_dispersion']
+              assert tied['gate_parameters'] == 8
+              assert tied['all_gates_zero_after_remap'] is True
+              assert tied['zero_gate_exact_base_replay'] is True
+              methods = {item['method'] for item in initialization['adapted_tensors']}
+              assert 'zero-new-tied-mean-dispersion-gates' in methods
+
+              prediction_path = run / 'best_validation_predictions.npz'
+              with np.load(prediction_path, allow_pickle=False) as data:
+                  order = np.argsort(data['indices'])
+                  labels = data['labels'][order]
+                  probabilities = data['probabilities'][order].astype(np.float64)
+              metrics = metrics_from_probabilities(
+                  labels, probabilities, ['axion', 'cdm', 'no_sub']
+              )
+              correct = int(round(metrics['accuracy'] * metrics['samples']))
+              passed = (
+                  correct >= 16750
+                  and metrics['macro_auc_ovr'] >= 0.992624
+                  and metrics['nll'] <= 0.145003
+              )
+              result = {
+                  'scope': 'Model-I development validation only; no test cache opened',
+                  'training_images': 35001,
+                  'parameters': 122603,
+                  'quantum_parameters': 88,
+                  'new_dispersion_parameters': 8,
+                  'predeclared_promotion_correct': 16750,
+                  'predeclared_promotion_macro_auc': 0.992624,
+                  'predeclared_promotion_nll': 0.145003,
+                  'passed_predeclared_promotion_gate': passed,
+                  'correct': correct,
+                  'metrics': metrics,
+                  'checkpoint_sha256': hashlib.sha256((run / 'best.pt').read_bytes()).hexdigest(),
+                  'prediction_sha256': hashlib.sha256(prediction_path.read_bytes()).hexdigest(),
+              }
+              (root / 'analysis.json').write_text(
+                  json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + '\n'
+              )
+              print('TIED_DISPERSION_ANALYSIS', json.dumps(result, sort_keys=True), flush=True)
+              PY
+            env:
+            - name: XDG_CACHE_HOME
+              value: /workspace/data/cache/xdg
+            - name: TORCH_HOME
+              value: /workspace/data/cache/torch
+            volumeMounts:
+            - name: data-volume
+              mountPath: /workspace/data
+            resources:
+              requests:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+              limits:
+                cpu: "4"
+                memory: 32Gi
+                nvidia.com/gpu: "1"
+          volumes:
+          - name: data-volume
+            persistentVolumeClaim:
+              claimName: susmered-datavol-1
+  runPolicy:
+    cleanPodPolicy: None
+    suspend: false
