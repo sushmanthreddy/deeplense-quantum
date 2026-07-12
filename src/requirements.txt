@@ -1,8 +1,0 @@
-torch
-torchvision
-torchquantum
-e2cnn
-numpy
-scikit-learn
-matplotlib
-tqdm
