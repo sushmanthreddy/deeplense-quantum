@@ -1,0 +1,73 @@
+{
+  "best_epoch": 18,
+  "core_update_l2": 0.939555823802948,
+  "initialization": null,
+  "official_test_evaluated": false,
+  "parameters": {
+    "core": 88,
+    "encoder": 242338,
+    "head_and_context": 29347,
+    "orbit_projection": 1032,
+    "physics": 0,
+    "quantum": 0,
+    "total": 272805
+  },
+  "symmetry": {
+    "actions": 8,
+    "max": 3.337860107421875e-05,
+    "mean": 3.688037395477295e-07,
+    "p99": 1.7063617706298908e-05,
+    "samples": 16
+  },
+  "validation": {
+    "accuracy": 0.9818327239488117,
+    "balanced_accuracy": 0.9819505392790263,
+    "brier": 0.028400883572094617,
+    "confusion_matrix": [
+      [
+        5640,
+        139,
+        0
+      ],
+      [
+        144,
+        5781,
+        29
+      ],
+      [
+        0,
+        6,
+        5765
+      ]
+    ],
+    "ece_15": 0.010153182766909404,
+    "macro_auc_ovr": 0.9982608691710944,
+    "macro_f1": 0.9819104444140998,
+    "nll": 0.062127407640218735,
+    "per_class": {
+      "axion": {
+        "auc_ovr": 0.9980709214415402,
+        "f1": 0.9755253826861542,
+        "precision": 0.975103734439834,
+        "recall": 0.9759473957432082,
+        "support": 5779
+      },
+      "cdm": {
+        "auc_ovr": 0.9969576057130642,
+        "f1": 0.9732323232323233,
+        "precision": 0.9755315558555518,
+        "recall": 0.9709439032583137,
+        "support": 5954
+      },
+      "no_sub": {
+        "auc_ovr": 0.9997540803586789,
+        "f1": 0.9969736273238219,
+        "precision": 0.994994822229893,
+        "recall": 0.9989603188355571,
+        "support": 5771
+      }
+    },
+    "samples": 17504
+  },
+  "wall_seconds": 492.85446405410767
+}

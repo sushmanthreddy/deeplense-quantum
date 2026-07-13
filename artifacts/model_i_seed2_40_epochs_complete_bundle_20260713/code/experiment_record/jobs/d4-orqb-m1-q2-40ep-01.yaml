@@ -1,0 +1,196 @@
+apiVersion: kubeflow.org/v1
+kind: PyTorchJob
+metadata:
+  name: d4-orqb-m1-q2-40ep-01
+  namespace: sbg-mechanistic-interpretability
+  labels:
+    project: deeplense-quantum
+    dataset: model-i
+    stage: fixed-backbone-quantum-40epochs
+spec:
+  nprocPerNode: "1"
+  runPolicy:
+    activeDeadlineSeconds: 7200
+    cleanPodPolicy: None
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1
+      restartPolicy: Never
+      template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          automountServiceAccountToken: false
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 0
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+            - name: data-volume
+              persistentVolumeClaim:
+                claimName: susmered-datavol-1
+            - name: tmp
+              emptyDir: {}
+          containers:
+            - name: pytorch
+              image: docker.io/pytorch/pytorch@sha256:971fbeae82c0a5a7a970a264a8b8ce1c3426aa79df7111004ad2bc2640f7d89c
+              imagePullPolicy: IfNotPresent
+              command: ["bash", "-lc"]
+              args:
+                - |
+                  set -euo pipefail
+                  export PYTHONDONTWRITEBYTECODE=1
+                  export PYTHONUNBUFFERED=1
+                  export HOME=/tmp
+                  export TMPDIR=/tmp
+                  export XDG_CACHE_HOME=/workspace/data/cache/xdg
+                  export TORCH_HOME=/workspace/data/cache/torch
+                  export OMP_NUM_THREADS=4
+                  export MKL_NUM_THREADS=4
+                  export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:256
+
+                  ARCHIVE=/workspace/data/jobs/deeplense-quantum/d4-orqb-40epochs-20260713/source-f10aad3.tar
+                  BACKBONE=/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/full-development-01/pretrain-context/best.pt
+                  OUTPUT=/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/fixed-backbone-40epochs/seed-2/quantum-20260713-01
+                  export ARCHIVE BACKBONE OUTPUT
+
+                  test "$(sha256sum "${ARCHIVE}" | cut -d' ' -f1)" = "a687cd1a6c52cde6a8fdfb61d6df195002e40df8a18f76082d9acc0652540dc6"
+                  test "$(sha256sum "${BACKBONE}" | cut -d' ' -f1)" = "d46c458444474f50262e9e00be0edcca72a8081e55039cc722074d10a16b7dcb"
+                  test ! -e "${OUTPUT}"
+                  test -d /workspace/data/cache/d4-orqb/model_i_96_v1/development
+
+                  python - <<'PY'
+                  import os
+                  from pathlib import Path
+                  import tarfile
+
+                  archive = Path(os.environ["ARCHIVE"])
+                  destination = Path("/tmp/d4-orqb-40ep-source")
+                  destination.mkdir(parents=True, exist_ok=False)
+                  with tarfile.open(archive) as bundle:
+                      bundle.extractall(destination)
+                  PY
+                  export PYTHONPATH=/tmp/d4-orqb-40ep-source/source-f10aad3/src
+
+                  mkdir -p "${OUTPUT}"
+                  exec > >(tee -a "${OUTPUT}/job.log") 2>&1
+
+                  echo "PROTOCOL fresh seed-2 40-epoch replication; official test closed"
+                  echo "SOURCE_COMMIT f10aad3a92b51dd3af0cc7ecf89288cb53001269"
+                  nvidia-smi --query-gpu=index,name,uuid,driver_version,memory.total --format=csv,noheader
+                  python - <<'PY'
+                  import torch
+                  print({
+                      "torch": torch.__version__,
+                      "cuda_runtime": torch.version.cuda,
+                      "cuda_available": torch.cuda.is_available(),
+                      "gpu_count": torch.cuda.device_count(),
+                      "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+                  })
+                  assert torch.cuda.is_available()
+                  assert torch.cuda.device_count() == 1
+                  PY
+
+                  python -m d4_orqb.train \
+                    --development-root /workspace/data/datasets/DEEPLENS_DATASETS/Model_I \
+                    --test-root /workspace/data/datasets/DEEPLENS_DATASETS/Model_I_test \
+                    --cache-root /workspace/data/cache/d4-orqb \
+                    --output-dir "${OUTPUT}" \
+                    --image-size 96 \
+                    --encoder-variant tiny \
+                    --physics-variant base \
+                    --core quantum \
+                    --heads 4 \
+                    --reuploads 2 \
+                    --epochs 40 \
+                    --patience 41 \
+                    --batch-size 256 \
+                    --workers 4 \
+                    --io-workers 8 \
+                    --encoder-learning-rate 0.0005 \
+                    --learning-rate 0.003 \
+                    --core-learning-rate 0.005 \
+                    --init-backbone-checkpoint "${BACKBONE}" \
+                    --seed 2 \
+                    --split-seed 42
+
+                  python - <<'PY'
+                  import hashlib
+                  import json
+                  import os
+                  from pathlib import Path
+
+                  output = Path(os.environ["OUTPUT"])
+                  history = json.loads((output / "history.json").read_text())
+                  summary = json.loads((output / "summary.json").read_text())
+                  config = json.loads((output / "config.json").read_text())
+                  data_report = json.loads((output / "data_report.json").read_text())
+
+                  assert len(history) == 40
+                  assert history[-1]["epoch"] == 40
+                  assert config["epochs"] == 40
+                  assert config["patience"] == 41
+                  assert config["core"] == "quantum"
+                  assert config["seed"] == 2
+                  assert summary["official_test_evaluated"] is False
+                  assert data_report["official_test_cache_opened"] is False
+                  assert summary["parameters"]["total"] == 245221
+                  assert summary["parameters"]["quantum"] == 88
+
+                  def sha256(path: Path) -> str:
+                      digest = hashlib.sha256()
+                      with path.open("rb") as handle:
+                          for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                              digest.update(chunk)
+                      return digest.hexdigest()
+
+                  artifacts = {
+                      name: sha256(output / name)
+                      for name in (
+                          "best.pt",
+                          "last.pt",
+                          "history.json",
+                          "summary.json",
+                          "best_validation_predictions.npz",
+                      )
+                  }
+                  provenance = {
+                      "schema": "deeplense.d4-orqb-40epoch-training.v1",
+                      "status": "passed",
+                      "protocol": "fresh-40-epoch-seed-2-replication",
+                      "source_commit": "f10aad3a92b51dd3af0cc7ecf89288cb53001269",
+                      "source_archive_sha256": "a687cd1a6c52cde6a8fdfb61d6df195002e40df8a18f76082d9acc0652540dc6",
+                      "backbone_sha256": "d46c458444474f50262e9e00be0edcca72a8081e55039cc722074d10a16b7dcb",
+                      "epochs_completed": len(history),
+                      "best_epoch": summary["best_epoch"],
+                      "validation": summary["validation"],
+                      "parameters": summary["parameters"],
+                      "official_test_evaluated": False,
+                      "artifact_sha256": artifacts,
+                  }
+                  temporary = output / "run_provenance.json.tmp"
+                  temporary.write_text(json.dumps(provenance, indent=2, sort_keys=True) + "\n")
+                  os.replace(temporary, output / "run_provenance.json")
+                  print("TRAINING_COMPLETE " + json.dumps(provenance, sort_keys=True))
+                  PY
+              resources:
+                requests:
+                  cpu: "4"
+                  memory: 32Gi
+                  nvidia.com/gpu: "1"
+                limits:
+                  cpu: "4"
+                  memory: 32Gi
+                  nvidia.com/gpu: "1"
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                readOnlyRootFilesystem: true
+              volumeMounts:
+                - name: data-volume
+                  mountPath: /workspace/data
+                - name: tmp
+                  mountPath: /tmp

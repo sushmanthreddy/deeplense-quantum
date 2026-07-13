@@ -1,0 +1,171 @@
+{
+  "amp": "CUDA bfloat16 encoder/head; float32 analytic PyTorch quantum core",
+  "angle_shape": [
+    17504,
+    4,
+    2,
+    8
+  ],
+  "checkpoint": "/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/fixed-backbone-40epochs/seed-2/quantum-20260713-01/best.pt",
+  "checkpoint_epoch": 40,
+  "checkpoint_sha256": "5a7156ecc483ce215843b980c3f356ddc10ce61bc619ca0b01537619d48e4edf",
+  "circuit_parameter_shape": [
+    4,
+    2,
+    11
+  ],
+  "class_counts": [
+    5779,
+    5954,
+    5771
+  ],
+  "class_names": [
+    "axion",
+    "cdm",
+    "no_sub"
+  ],
+  "config_sha256": "fe089e32e299fb74fdeb161ca8ed624edb3aa2bcad06fe8e54c9752f401ae87f",
+  "development_cache_sha256": {
+    "images.npy": "c3c639584e0a9e2d6ba369e3fb41ba0451b2170a362ec419fa1182e55d5ce070",
+    "labels.npy": "3a12100d1df155738b57255e6625ba1287c2d74c5bab53bce2cd0597afe89b17",
+    "manifest.csv": "c04a3c62afebe3f660ffaad4333b6632471a91c6f5f239f84e68b4b94c330025",
+    "metadata.json": "9f36faff5fc3300b97512b1c29439b2e993888318a31835938749e10fbf12379"
+  },
+  "invariant_shape": [
+    17504,
+    48
+  ],
+  "official_test_cache_opened": false,
+  "official_test_evaluated": false,
+  "parameters": {
+    "quantum": 88,
+    "total": 245221
+  },
+  "reference": "/workspace/data/outputs/deeplense-quantum-cudaq/model-i/q2-40epochs-cudaq-20260713-01/reference/validation_reference.npz",
+  "reference_sha256": "f570e10df13f82947b5889b7e92ac85491f19f57f463d1263e1e06b7510ca3ff",
+  "runtime": {
+    "batch_size": 128,
+    "bf16_supported": true,
+    "elapsed_seconds": 24.785047170706093,
+    "gpu": "NVIDIA H200",
+    "host": "d4-orqb-m1-q2-40ep-export-01-master-0",
+    "python": "3.10.13",
+    "torch": "2.1.2",
+    "torch_cuda": "11.8",
+    "workers": 4
+  },
+  "samples": 17504,
+  "schema": "deeplense.d4-orqb-40epoch-cudaq-reference.v1",
+  "source_archive": "/workspace/data/jobs/deeplense-quantum/d4-orqb-40epochs-20260713/source-f10aad3.tar",
+  "source_archive_sha256": "a687cd1a6c52cde6a8fdfb61d6df195002e40df8a18f76082d9acc0652540dc6",
+  "source_commit": "f10aad3a92b51dd3af0cc7ecf89288cb53001269",
+  "split": "development_validation",
+  "split_indices_sha256": "ef0f813e7ad4b186adf24c1dae809ec3dc1808ce93d40f4ed7e1044104436d07",
+  "status": "passed",
+  "stored_best_logit_max_abs_error": 0.03125,
+  "stored_best_prediction_mismatches": 0,
+  "training_provenance_sha256": "65748851ddadc73425cdfa8d7e60e1c089dc336af4ba6f7c97c545eb4201acaa",
+  "training_root": "/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/fixed-backbone-40epochs/seed-2/quantum-20260713-01",
+  "validation_bf16": {
+    "accuracy": 0.9860031992687386,
+    "balanced_accuracy": 0.9861376122678861,
+    "brier": 0.02347188933874201,
+    "confusion_matrix": [
+      [
+        5697,
+        82,
+        0
+      ],
+      [
+        126,
+        5795,
+        33
+      ],
+      [
+        0,
+        4,
+        5767
+      ]
+    ],
+    "ece_15": 0.009406198524415427,
+    "macro_auc_ovr": 0.9980270123649072,
+    "macro_f1": 0.986057699190543,
+    "nll": 0.05661344528198242,
+    "per_class": {
+      "axion": {
+        "auc_ovr": 0.998053919953541,
+        "f1": 0.9820720565419756,
+        "precision": 0.9783616692426584,
+        "recall": 0.9858106938916767,
+        "support": 5779
+      },
+      "cdm": {
+        "auc_ovr": 0.9965244798869253,
+        "f1": 0.9792986903253063,
+        "precision": 0.985376636626424,
+        "recall": 0.9732952636882768,
+        "support": 5954
+      },
+      "no_sub": {
+        "auc_ovr": 0.9995026372542551,
+        "f1": 0.9968023507043472,
+        "precision": 0.9943103448275862,
+        "recall": 0.9993068792237048,
+        "support": 5771
+      }
+    },
+    "samples": 17504
+  },
+  "validation_fp32_head": {
+    "accuracy": 0.9860031992687386,
+    "balanced_accuracy": 0.9861376122678861,
+    "brier": 0.02347425859176495,
+    "confusion_matrix": [
+      [
+        5697,
+        82,
+        0
+      ],
+      [
+        126,
+        5795,
+        33
+      ],
+      [
+        0,
+        4,
+        5767
+      ]
+    ],
+    "ece_15": 0.009519600597171033,
+    "macro_auc_ovr": 0.9980257993785265,
+    "macro_f1": 0.986057699190543,
+    "nll": 0.05661582574248314,
+    "per_class": {
+      "axion": {
+        "auc_ovr": 0.9980613359671864,
+        "f1": 0.9820720565419756,
+        "precision": 0.9783616692426584,
+        "recall": 0.9858106938916767,
+        "support": 5779
+      },
+      "cdm": {
+        "auc_ovr": 0.9965093930814455,
+        "f1": 0.9792986903253063,
+        "precision": 0.985376636626424,
+        "recall": 0.9732952636882768,
+        "support": 5954
+      },
+      "no_sub": {
+        "auc_ovr": 0.9995066690869479,
+        "f1": 0.9968023507043472,
+        "precision": 0.9943103448275862,
+        "recall": 0.9993068792237048,
+        "support": 5771
+      }
+    },
+    "samples": 17504
+  },
+  "weights": "/workspace/data/outputs/deeplense-quantum-cudaq/model-i/q2-40epochs-cudaq-20260713-01/reference/q2_weights.npz",
+  "weights_sha256": "55877e52c5e5413768707f4d316796296d175d2b9ef34a7f806f8adcfe3b58e3"
+}

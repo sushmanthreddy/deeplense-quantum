@@ -1,0 +1,102 @@
+apiVersion: kubeflow.org/v1
+kind: PyTorchJob
+metadata:
+  name: d4-orqb-m1-q2-40ep-cudaq-01
+  namespace: sbg-mechanistic-interpretability
+  labels:
+    project: deeplense-quantum
+    dataset: model-i
+    stage: q2-40epoch-literal-cudaq-validation
+spec:
+  nprocPerNode: "1"
+  runPolicy:
+    activeDeadlineSeconds: 1800
+    cleanPodPolicy: None
+  pytorchReplicaSpecs:
+    Master:
+      replicas: 1
+      restartPolicy: Never
+      template:
+        metadata:
+          annotations:
+            sidecar.istio.io/inject: "false"
+        spec:
+          automountServiceAccountToken: false
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 0
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+            - name: data-volume
+              persistentVolumeClaim:
+                claimName: susmered-datavol-1
+            - name: tmp
+              emptyDir: {}
+          containers:
+            - name: pytorch
+              image: nvcr.io/nvidia/quantum/cuda-quantum@sha256:84901e99f1d83e0abdb7b02f9870cef1fb1122f889e53af5a0af2c6b7fe3596e
+              imagePullPolicy: IfNotPresent
+              workingDir: /workspace/data/jobs/deeplense-quantum/d4-orqb-40epochs-20260713
+              command: ["bash", "-lc"]
+              args:
+                - |
+                  set -euo pipefail
+                  export PYTHONDONTWRITEBYTECODE=1
+                  export PYTHONUNBUFFERED=1
+                  export HOME=/tmp
+                  export TMPDIR=/tmp
+                  export XDG_CACHE_HOME=/tmp/xdg
+                  export CUDA_CACHE_PATH=/tmp/cuda-cache
+
+                  SOURCE=/workspace/data/jobs/deeplense-quantum/d4-orqb-40epochs-20260713/verify_cudaq_validation_40ep.py
+                  NOTEBOOK=/workspace/data/repos/deeplense-quantum/Best_D4_ORQB_Quantum_Model.ipynb
+                  REFERENCE_ROOT=/workspace/data/outputs/deeplense-quantum-cudaq/model-i/q2-40epochs-cudaq-20260713-01/reference
+                  OUTPUT=/workspace/data/outputs/deeplense-quantum-cudaq/model-i/q2-40epochs-cudaq-20260713-01/cudaq_validation_full
+
+                  test "$(sha256sum "${SOURCE}" | cut -d' ' -f1)" = "3dc041ffacf731da087d44f400ce94ecac734a8aa68b80e71d0e8dd888656919"
+                  test -f "${NOTEBOOK}"
+                  test -f "${REFERENCE_ROOT}/validation_reference.npz"
+                  test -f "${REFERENCE_ROOT}/q2_weights.npz"
+                  test -f "${REFERENCE_ROOT}/export_report.json"
+                  test ! -e "${OUTPUT}"
+
+                  echo "PROTOCOL literal notebook CUDA-Q kernel; full development-validation; official test closed"
+                  nvidia-smi --query-gpu=index,name,uuid,driver_version,memory.total --format=csv,noheader
+                  python - <<'PY'
+                  import cudaq
+                  import subprocess
+                  completed = subprocess.run(["nvq++", "--version"], text=True, capture_output=True, check=False)
+                  version = (completed.stdout or completed.stderr).strip()
+                  print({"cudaq": version})
+                  assert "0.12.0" in version
+                  PY
+
+                  python "${SOURCE}" \
+                    --notebook "${NOTEBOOK}" \
+                    --reference "${REFERENCE_ROOT}/validation_reference.npz" \
+                    --weights "${REFERENCE_ROOT}/q2_weights.npz" \
+                    --export-report "${REFERENCE_ROOT}/export_report.json" \
+                    --output-dir "${OUTPUT}" \
+                    --target nvidia \
+                    --chunk-size 64 \
+                    --parity-samples 16
+              resources:
+                requests:
+                  cpu: "4"
+                  memory: 16Gi
+                  nvidia.com/gpu: "1"
+                limits:
+                  cpu: "4"
+                  memory: 16Gi
+                  nvidia.com/gpu: "1"
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                readOnlyRootFilesystem: true
+              volumeMounts:
+                - name: data-volume
+                  mountPath: /workspace/data
+                - name: tmp
+                  mountPath: /tmp

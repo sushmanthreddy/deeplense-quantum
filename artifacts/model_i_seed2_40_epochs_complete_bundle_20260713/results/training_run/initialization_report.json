@@ -1,0 +1,13 @@
+{
+  "adapted_tensors": [],
+  "checkpoint": "/workspace/data/outputs/deeplense-quantum/d4-orqb/model-i/full-development-01/pretrain-context/best.pt",
+  "checkpoint_sha256": "d46c458444474f50262e9e00be0edcca72a8081e55039cc722074d10a16b7dcb",
+  "loaded_prefixes": [
+    "physics.",
+    "encoder.",
+    "orbit_projection."
+  ],
+  "loaded_tensors": 112,
+  "missing_target_tensors": 7,
+  "source_epoch": 18
+}

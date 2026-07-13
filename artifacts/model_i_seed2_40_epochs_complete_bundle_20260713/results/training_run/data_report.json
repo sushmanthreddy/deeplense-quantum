@@ -1,0 +1,43 @@
+{
+  "class_names": [
+    "axion",
+    "cdm",
+    "no_sub"
+  ],
+  "development": {
+    "class_counts": {
+      "axion": 28897,
+      "cdm": 29772,
+      "no_sub": 28856
+    },
+    "classes": [
+      "axion",
+      "cdm",
+      "no_sub"
+    ],
+    "complete": true,
+    "dtype": "float16",
+    "image_size": 96,
+    "interpolation": "bilinear align_corners=False antialias=True",
+    "normalization": "float32 nonfinite cleanup; divide by max only when max > 1",
+    "samples": 87525,
+    "source_root": "/workspace/data/datasets/DEEPLENS_DATASETS/Model_I"
+  },
+  "development_manifest_sha256": "c04a3c62afebe3f660ffaad4333b6632471a91c6f5f239f84e68b4b94c330025",
+  "official_test_cache_opened": false,
+  "official_test_locked_during_selection": true,
+  "train_counts": {
+    "axion": 23118,
+    "cdm": 23818,
+    "no_sub": 23085
+  },
+  "train_membership_sha256": "b14cfdc30d9f9803843dd2471aeb0948241f1115cbb73e2db522c6071c860de1",
+  "train_size": 70021,
+  "train_subset_protocol": "legacy-rng",
+  "validation_counts": {
+    "axion": 5779,
+    "cdm": 5954,
+    "no_sub": 5771
+  },
+  "validation_size": 17504
+}

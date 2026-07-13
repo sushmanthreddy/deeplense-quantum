@@ -1,0 +1,7 @@
+commit f10aad3a92b51dd3af0cc7ecf89288cb53001269
+Author:     Codex <codex@local>
+AuthorDate: Sun Jul 12 13:59:22 2026 +0000
+Commit:     Codex <codex@local>
+CommitDate: Sun Jul 12 13:59:22 2026 +0000
+
+    Preserve D4-ORQB research before notebook consolidation
