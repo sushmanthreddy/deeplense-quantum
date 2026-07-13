@@ -1,0 +1,128 @@
+{
+  "artifact_sha256": {
+    "best.pt": "5a7156ecc483ce215843b980c3f356ddc10ce61bc619ca0b01537619d48e4edf",
+    "best_validation_predictions.npz": "543daaeb73264fe963334493af751b9debb2bded1b2e17a5770829ccc52c54bf",
+    "history.json": "2583e2ea3d567519ad8c6b74347d9c353cc4ef6b9e1aa32f5672af7e13cd7360",
+    "last.pt": "1268a442acf35b00f6bd5522b074f90c89c351f5ea5cb08d34ce881944c1a400",
+    "summary.json": "1b5bd7938746d12a93110188c0098618e42f5faca42fe8338f52cc33f0f81074"
+  },
+  "backbone_sha256": "d46c458444474f50262e9e00be0edcca72a8081e55039cc722074d10a16b7dcb",
+  "best_epoch": 40,
+  "epochs_completed": 40,
+  "official_test_evaluated": false,
+  "parameters": {
+    "circuit_energy_trainable": 0,
+    "circuit_equatorial_readout": false,
+    "circuit_equatorial_readout_trainable": 0,
+    "circuit_heads": 4,
+    "circuit_input_encoding": "angle",
+    "circuit_invariants": 48,
+    "circuit_meridional_readout": false,
+    "circuit_meridional_readout_trainable": 0,
+    "circuit_observable_readout": "pair",
+    "circuit_quantum_trainable": 88,
+    "circuit_qubits": 8,
+    "circuit_r2_entangler_trainable": 0,
+    "circuit_r2_entanglers": false,
+    "circuit_reuploads": 2,
+    "circuit_state_preparation_trainable": 88,
+    "circuit_statevector_dimension": 256,
+    "classifier_bias_gauge_degrees": 3,
+    "classifier_bias_trainable": 3,
+    "core": 88,
+    "core_architecture": "quantum",
+    "cross_scale_reupload": false,
+    "cross_scale_reupload_gate_trainable": 0,
+    "cross_scale_scattering_dim": 0,
+    "cross_scale_walsh_channels": 0,
+    "dispersion_gate_trainable": 0,
+    "encoder": 242338,
+    "encoder_final_channels": 128,
+    "encoder_multiscale_correlation_pool": false,
+    "encoder_output_dim": 128,
+    "encoder_variant": "tiny",
+    "equatorial_readout": false,
+    "equatorial_readout_trainable": 0,
+    "haar_subtype_max_envelope": false,
+    "haar_subtype_residual": false,
+    "haar_subtype_residual_trainable": 0,
+    "haar_summary_dim": 0,
+    "head_and_context": 1763,
+    "meridional_readout": false,
+    "meridional_readout_trainable": 0,
+    "mixture_trainable": 0,
+    "morphology_context_dim": 0,
+    "morphology_feature_dim": 0,
+    "observable_readout": "pair",
+    "orbit_projection": 1032,
+    "parallel_classical": 0,
+    "physics": 0,
+    "physics_summary": "none",
+    "physics_summary_dim": 0,
+    "physics_variant": "base",
+    "quantum": 88,
+    "quantum_encoding": "angle",
+    "quantum_state_preparation_trainable": 88,
+    "r2_entangler_trainable": 0,
+    "r2_entanglers": false,
+    "shared_late_refinement": false,
+    "shared_late_refinement_gate_trainable": 0,
+    "tied_mean_dispersion": false,
+    "total": 245221
+  },
+  "protocol": "fresh-40-epoch-seed-2-replication",
+  "schema": "deeplense.d4-orqb-40epoch-training.v1",
+  "source_archive_sha256": "a687cd1a6c52cde6a8fdfb61d6df195002e40df8a18f76082d9acc0652540dc6",
+  "source_commit": "f10aad3a92b51dd3af0cc7ecf89288cb53001269",
+  "status": "passed",
+  "validation": {
+    "accuracy": 0.9860031992687386,
+    "balanced_accuracy": 0.9861376122678861,
+    "brier": 0.02347237123072001,
+    "confusion_matrix": [
+      [
+        5697,
+        82,
+        0
+      ],
+      [
+        126,
+        5795,
+        33
+      ],
+      [
+        0,
+        4,
+        5767
+      ]
+    ],
+    "ece_15": 0.009399031859293014,
+    "macro_auc_ovr": 0.9980254653936512,
+    "macro_f1": 0.986057699190543,
+    "nll": 0.056614216417074203,
+    "per_class": {
+      "axion": {
+        "auc_ovr": 0.9980526581243536,
+        "f1": 0.9820720565419756,
+        "precision": 0.9783616692426584,
+        "recall": 0.9858106938916767,
+        "support": 5779
+      },
+      "cdm": {
+        "auc_ovr": 0.996520510057628,
+        "f1": 0.9792986903253063,
+        "precision": 0.985376636626424,
+        "recall": 0.9732952636882768,
+        "support": 5954
+      },
+      "no_sub": {
+        "auc_ovr": 0.9995032279989721,
+        "f1": 0.9968023507043472,
+        "precision": 0.9943103448275862,
+        "recall": 0.9993068792237048,
+        "support": 5771
+      }
+    },
+    "samples": 17504
+  }
+}

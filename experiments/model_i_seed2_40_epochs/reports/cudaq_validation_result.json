@@ -1,0 +1,179 @@
+{
+  "bf16_head": {
+    "reason": "PyTorch import failed: ModuleNotFoundError: No module named 'torch'",
+    "status": "unavailable"
+  },
+  "engine": "literal notebook @cudaq.kernel via cudaq.get_state",
+  "export_report": "/workspace/data/outputs/deeplense-quantum-cudaq/model-i/q2-40epochs-cudaq-20260713-01/reference/export_report.json",
+  "export_report_sha256": "943c24377b7cf8d5f8f60e8acd8781ade9cfe7a7b7853d9c2c7e45dd86aa4a3e",
+  "fp32_head": {
+    "engine": "NumPy float32 LayerNorm/MLP",
+    "logit_atol": 0.002,
+    "logit_max_abs_error": 2.5272369384765625e-05,
+    "logit_mismatches": 0,
+    "logit_rtol": 0.002,
+    "metrics": {
+      "accuracy": 0.9860031992687386,
+      "balanced_accuracy": 0.9861376122678861,
+      "confusion_matrix": [
+        [
+          5697,
+          82,
+          0
+        ],
+        [
+          126,
+          5795,
+          33
+        ],
+        [
+          0,
+          4,
+          5767
+        ]
+      ],
+      "correct": 17259,
+      "macro_auc_ovr": 0.9980258042618159,
+      "macro_f1": 0.986057699190543,
+      "per_class": {
+        "axion": {
+          "auc_ovr": 0.9980613433463046,
+          "f1": 0.9820720565419756,
+          "precision": 0.9783616692426584,
+          "recall": 0.9858106938916767,
+          "support": 5779
+        },
+        "cdm": {
+          "auc_ovr": 0.9965094003521952,
+          "f1": 0.9792986903253063,
+          "precision": 0.985376636626424,
+          "recall": 0.9732952636882768,
+          "support": 5954
+        },
+        "no_sub": {
+          "auc_ovr": 0.9995066690869477,
+          "f1": 0.9968023507043472,
+          "precision": 0.9943103448275862,
+          "recall": 0.9993068792237048,
+          "support": 5771
+        }
+      },
+      "samples": 17504
+    },
+    "prediction_mismatches": 0,
+    "status": "passed"
+  },
+  "head_circuits": 70016,
+  "invariant_atol": 0.0002,
+  "invariant_max_abs_error": 5.9604644775390625e-06,
+  "invariant_mismatches": 0,
+  "invariant_rtol": 0.0002,
+  "invariant_values_compared": 840192,
+  "invariants": "/workspace/data/outputs/deeplense-quantum-cudaq/model-i/q2-40epochs-cudaq-20260713-01/cudaq_validation_full/cudaq_invariants.npy",
+  "invariants_sha256": "8246c98332f18f237d7c336764ea9100ee0f6380bc9b6f8d6f0817b25d34ef9b",
+  "kernel_source_sha256": "d6ca4829bfaa2d18c80a460dd267f4dae8cd3a6da2e6713092c46c22d2cd1dc3",
+  "metrics": {
+    "accuracy": 0.9860031992687386,
+    "balanced_accuracy": 0.9861376122678861,
+    "confusion_matrix": [
+      [
+        5697,
+        82,
+        0
+      ],
+      [
+        126,
+        5795,
+        33
+      ],
+      [
+        0,
+        4,
+        5767
+      ]
+    ],
+    "correct": 17259,
+    "macro_auc_ovr": 0.9980258042618159,
+    "macro_f1": 0.986057699190543,
+    "per_class": {
+      "axion": {
+        "auc_ovr": 0.9980613433463046,
+        "f1": 0.9820720565419756,
+        "precision": 0.9783616692426584,
+        "recall": 0.9858106938916767,
+        "support": 5779
+      },
+      "cdm": {
+        "auc_ovr": 0.9965094003521952,
+        "f1": 0.9792986903253063,
+        "precision": 0.985376636626424,
+        "recall": 0.9732952636882768,
+        "support": 5954
+      },
+      "no_sub": {
+        "auc_ovr": 0.9995066690869477,
+        "f1": 0.9968023507043472,
+        "precision": 0.9943103448275862,
+        "recall": 0.9993068792237048,
+        "support": 5771
+      }
+    },
+    "samples": 17504
+  },
+  "notebook": "/workspace/data/repos/deeplense-quantum/Best_D4_ORQB_Quantum_Model.ipynb",
+  "notebook_kernel_cell_index": 4,
+  "notebook_kernel_cell_sha256": "d6ca4829bfaa2d18c80a460dd267f4dae8cd3a6da2e6713092c46c22d2cd1dc3",
+  "notebook_sha256": "c520b0370bb74fecd9f09616953e7933fc5a76e74f2c43ff36e9cdc0f93afc79",
+  "official_test_artifacts_opened": 0,
+  "official_test_evaluated": false,
+  "parity": {
+    "atol": 0.0002,
+    "elapsed_seconds": 0.700097655877471,
+    "head_circuits_per_second": 91.4158181543763,
+    "max_abs_error": 3.6656856536865234e-06,
+    "mismatches": 0,
+    "rtol": 0.0002,
+    "samples": 16,
+    "status": "passed",
+    "values": 768
+  },
+  "predictions": "/workspace/data/outputs/deeplense-quantum-cudaq/model-i/q2-40epochs-cudaq-20260713-01/cudaq_validation_full/predictions.npz",
+  "predictions_sha256": "64e1efbbd0942c22e4e2795ef6a92400da5dbc7c80e99587c744052393ff69e4",
+  "reference": "/workspace/data/outputs/deeplense-quantum-cudaq/model-i/q2-40epochs-cudaq-20260713-01/reference/validation_reference.npz",
+  "reference_sha256": "f570e10df13f82947b5889b7e92ac85491f19f57f463d1263e1e06b7510ca3ff",
+  "runner": "/workspace/data/jobs/deeplense-quantum/d4-orqb-40epochs-20260713/verify_cudaq_validation_40ep.py",
+  "runner_sha256": "3dc041ffacf731da087d44f400ce94ecac734a8aa68b80e71d0e8dd888656919",
+  "runtime": {
+    "chunk_size": 64,
+    "cudaq_version": "CUDA-Q Version amd64-cu11-0.12.0 (https://github.com/NVIDIA/cuda-quantum 6adf92bcda4df7465e4fe82f1c8f782ae69d8bd2)",
+    "elapsed_seconds": 232.73682504985482,
+    "head_circuits_per_second": 304.70661763386954,
+    "host": "d4-orqb-m1-q2-40ep-cudaq-01-master-0",
+    "images_per_second": 76.17665440846739,
+    "nvidia_smi": [
+      "0, NVIDIA H200, GPU-94aab0df-45a3-8a0a-d6d1-76ddb3ddc24b, 550.163.01, 143771 MiB"
+    ],
+    "nvidia_smi_returncode": 0,
+    "nvidia_smi_stderr": "",
+    "python": "3.10.12",
+    "quantum_elapsed_seconds": 229.78168489970267,
+    "requested_target": "nvidia",
+    "target": {
+      "description": "The NVIDIA Target provides a simulated QPU via cuStateVec (state-vector simulation) integration.",
+      "get_precision": "SimulationPrecision.fp32",
+      "is_emulated": "False",
+      "is_remote": "False",
+      "name": "nvidia",
+      "num_qpus": "1",
+      "platform": "default",
+      "simulator": "cusvsim_fp32"
+    }
+  },
+  "samples": 17504,
+  "schema": "deeplense.d4-orqb-40epoch-cudaq-validation.v1",
+  "selected_classifier_mode": "cudaq_invariants_plus_numpy_float32_head",
+  "split": "development_validation",
+  "status": "passed",
+  "weights": "/workspace/data/outputs/deeplense-quantum-cudaq/model-i/q2-40epochs-cudaq-20260713-01/reference/q2_weights.npz",
+  "weights_sha256": "55877e52c5e5413768707f4d316796296d175d2b9ef34a7f806f8adcfe3b58e3"
+}

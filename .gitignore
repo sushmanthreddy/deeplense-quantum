@@ -7,3 +7,7 @@
 # Python
 __pycache__/
 *.py[cod]
+
+# Experiment-local runtime artifacts (checkpoints and arrays stay on the data PVC)
+experiments/**/artifacts/
+experiments/**/outputs/
