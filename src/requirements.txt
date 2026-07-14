@@ -1,0 +1,5 @@
+numpy
+torch
+torchquantum @ git+https://github.com/mit-han-lab/torchquantum.git@8dc3255c51477dd4c28892049571df032c77e2ff
+matplotlib
+ipykernel

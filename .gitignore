@@ -1,13 +1,86 @@
+# The repository is an allowlist: unknown top-level content stays local.
+/*
 
+# Repository controls and Markdown documentation.
+!/.gitignore
+!/.gitattributes
+!/*.md
+
+# Compact Python package: exactly the main-like eight-module layout.
+!/src/
+/src/*
+!/src/README.md
+!/src/requirements.txt
+!/src/d4_orqb/
+/src/d4_orqb/*
+!/src/d4_orqb/__init__.py
+!/src/d4_orqb/config.py
+!/src/d4_orqb/data.py
+!/src/d4_orqb/encoder.py
+!/src/d4_orqb/engine.py
+!/src/d4_orqb/main.py
+!/src/d4_orqb/model.py
+!/src/d4_orqb/quantum.py
+
+# Canonical notebook implementation only.
+!/notebooks/
+/notebooks/*
+!/notebooks/d4_orqb/
+/notebooks/d4_orqb/*
+!/notebooks/d4_orqb/train_model_i.ipynb
+
+# Static assets may be selected deliberately; generated run figures stay ignored.
+!/assets/
+/assets/*
+!/assets/**/
+!/assets/**/*.md
+!/assets/**/*.png
+!/assets/**/*.jpg
+!/assets/**/*.jpeg
+!/assets/**/*.gif
+!/assets/**/*.svg
+!/assets/**/*.pdf
+
+# The weights directory may contain documentation, but generated weights are ignored.
+!/weights/
+/weights/*
+!/weights/README.md
+
+# Generated runner manifests and structured run state are never committed.
+runner.yaml
+*.yaml
+*.yml
+*.json
+
+# Datasets, caches, arrays, checkpoints, logs, outputs, and archives.
+*.npy
+*.npz
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.log
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+cache/
+caches/
+data/
+datasets/
+outputs/
+runs/
+results/
+artifacts/
+
+# Python/Jupyter/editor noise.
 .DS_Store
-
-# Jupyter checkpoints
-.ipynb_checkpoints/
-
-# Python
-__pycache__/
+**/.DS_Store
+**/__pycache__/
 *.py[cod]
-
-# Experiment-local runtime artifacts (checkpoints and arrays stay on the data PVC)
-experiments/**/artifacts/
-experiments/**/outputs/
+**/.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
