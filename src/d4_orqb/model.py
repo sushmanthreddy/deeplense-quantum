@@ -9,7 +9,13 @@ import torch
 from torch import nn
 
 from .config import Config
-from .encoder import CompactOrbitEncoder, MorphologyChannelBank, d4_views
+from .encoder import (
+    CompactOrbitEncoder,
+    ForegroundSuppressedMorphologyChannelBank,
+    ModelIVPhysicsSummary,
+    MorphologyChannelBank,
+    d4_views,
+)
 from .quantum import D4OrbitQuantumBottleneck, R2_EDGES, R_EDGES, S_EDGES
 
 
@@ -101,6 +107,7 @@ class D4OrbitClassifier(nn.Module):
         core: Literal["quantum", "classical"] = "quantum",
         include_context: bool = False,
         dropout: float = 0.10,
+        foreground_suppressed: bool = False,
     ) -> None:
         super().__init__()
         if num_classes != 3:
@@ -111,7 +118,26 @@ class D4OrbitClassifier(nn.Module):
 
         # These remain top-level modules so the historical backbone-prefix
         # initialization contract stays stable.
-        self.physics = MorphologyChannelBank()
+        self.physics = (
+            ForegroundSuppressedMorphologyChannelBank()
+            if foreground_suppressed
+            else MorphologyChannelBank()
+        )
+        if foreground_suppressed:
+            self.physics_summary: nn.Module | None = ModelIVPhysicsSummary()
+            self.physics_summary_norm: nn.Module | None = nn.LayerNorm(
+                ModelIVPhysicsSummary.output_dim,
+                elementwise_affine=False,
+            )
+            self.physics_summary_head: nn.Module | None = nn.Linear(
+                ModelIVPhysicsSummary.output_dim, num_classes
+            )
+            nn.init.zeros_(self.physics_summary_head.weight)
+            nn.init.zeros_(self.physics_summary_head.bias)
+        else:
+            self.physics_summary = None
+            self.physics_summary_norm = None
+            self.physics_summary_head = None
         self.encoder = CompactOrbitEncoder(
             input_channels=self.physics.output_channels
         )
@@ -146,13 +172,28 @@ class D4OrbitClassifier(nn.Module):
             nn.Linear(32, num_classes),
         )
 
-    def orbit_encode(self, images: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def orbit_encode(
+        self,
+        images: torch.Tensor,
+        morphology: torch.Tensor | None = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Return learned orbit embeddings and circuit angle features."""
 
-        views = d4_views(images)
-        batch, group, channels, height, width = views.shape
-        flat_views = views.reshape(batch * group, channels, height, width)
-        morphology = self.physics(flat_views)
+        if self.physics.variant.startswith("model_iv_"):
+            # The deterministic bank is D4-equivariant, so lifting its output
+            # is exactly equivalent and avoids evaluating it eight times.
+            if morphology is None:
+                morphology = self.physics(images)
+            morphology_views = d4_views(morphology)
+            batch, group, channels, height, width = morphology_views.shape
+            morphology = morphology_views.reshape(
+                batch * group, channels, height, width
+            )
+        else:
+            views = d4_views(images)
+            batch, group, channels, height, width = views.shape
+            flat_views = views.reshape(batch * group, channels, height, width)
+            morphology = self.physics(flat_views)
         flat_encoded = self.encoder(morphology)
         encoded = flat_encoded.reshape(batch, group, -1)
         projected = self.orbit_projection(flat_encoded)
@@ -163,7 +204,18 @@ class D4OrbitClassifier(nn.Module):
         return encoded, angles
 
     def forward(self, images: torch.Tensor, return_aux: bool = False):
-        encoded, angles = self.orbit_encode(images)
+        # Canonicalize D4-transformed views before deterministic physics and
+        # convolution kernels. Odd torch.rot90 actions otherwise retain a
+        # transposed stride layout that can select numerically different CUDA
+        # kernels and amplify roundoff after feature standardization. Plain
+        # contiguous format is unambiguous for the singleton input channel.
+        images = images.contiguous()
+        morphology = None
+        summary = None
+        if self.physics_summary is not None:
+            morphology = self.physics(images)
+            summary = self.physics_summary(morphology)
+        encoded, angles = self.orbit_encode(images, morphology=morphology)
         context_embedding = None
         if self.context_projection is not None:
             context = torch.cat(
@@ -187,6 +239,14 @@ class D4OrbitClassifier(nn.Module):
         if context_embedding is not None:
             features.append(context_embedding)
         logits = self.head(torch.cat(features, dim=1))
+        summary_logits = None
+        if summary is not None:
+            assert self.physics_summary_norm is not None
+            assert self.physics_summary_head is not None
+            summary_logits = self.physics_summary_head(
+                self.physics_summary_norm(summary)
+            )
+            logits = logits + summary_logits
 
         if return_aux:
             return logits, {
@@ -194,6 +254,8 @@ class D4OrbitClassifier(nn.Module):
                 "angles": angles,
                 "invariants": invariants,
                 "equivariant": equivariant,
+                "physics_summary": summary,
+                "physics_summary_logits": summary_logits,
             }
         return logits
 
@@ -210,9 +272,21 @@ class D4OrbitClassifier(nn.Module):
             if self.context_projection is not None
             else 0
         )
+        summary_parameters = (
+            count(self.physics_summary_head)
+            if self.physics_summary_head is not None
+            else 0
+        )
         return {
             "total": count(self),
             "morphology_channels": count(self.physics),
+            "morphology_variant": self.physics.variant,
+            "physics_summary_dim": (
+                ModelIVPhysicsSummary.output_dim
+                if self.physics_summary is not None
+                else 0
+            ),
+            "physics_summary_head": summary_parameters,
             "encoder": count(self.encoder),
             "orbit_projection": count(self.orbit_projection),
             "core": count(self.core),
@@ -243,6 +317,7 @@ def build_model(
         core=core,
         include_context=include_context,
         dropout=config.dropout,
+        foreground_suppressed=config.dataset_id == "model_iv",
     )
 
 

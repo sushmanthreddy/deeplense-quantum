@@ -9,27 +9,50 @@ from typing import Sequence
 
 import torch
 
-from .config import Config
-from .data import build_loaders
-from .engine import pretrain_spec, quantum_spec, train
-from .quantum import require_torchquantum, smoke_test_torchquantum
+from .config import DATASET_IDS, Config
+from .data import (
+    INCONCLUSIVE_NO_SIGNAL_DETECTED,
+    PASS_SIGNAL_DETECTED,
+    build_loaders,
+    run_model_iv_audit,
+)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     defaults = Config()
     parser = argparse.ArgumentParser(
         description=(
-            "Train the selected Model-I D4-ORQB pipeline. Dataset paths are "
+            "Train the selected D4-ORQB pipeline. Dataset paths are "
             "intentionally blank by default."
         )
     )
+    parser.add_argument(
+        "--dataset-id",
+        choices=DATASET_IDS,
+        default=defaults.dataset_id,
+        help="Dataset family used for cache isolation and run provenance.",
+    )
     parser.add_argument("--development-root", default="")
+    parser.add_argument(
+        "--validation-root",
+        default="",
+        help=(
+            "Required Model-IV validation directory containing the three "
+            "class folders; unsupported for other datasets. This is a "
+            "development-validation split, not an official test root."
+        ),
+    )
     parser.add_argument("--cache-root", default="")
     parser.add_argument("--output-dir", default="")
     parser.add_argument(
         "--stage",
-        choices=("all", "pretrain", "quantum"),
+        choices=("all", "pretrain", "quantum", "audit"),
         default=defaults.stage,
+        help=(
+            "Run both training stages, one training stage, or the CPU-only "
+            "Model-IV signal audit. Model-IV training runs the audit "
+            "automatically before CUDA is initialized."
+        ),
     )
     parser.add_argument(
         "--backbone-checkpoint",
@@ -37,6 +60,24 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help=(
             "Optional pretraining checkpoint for --stage quantum. --stage all "
             "creates and uses its own checkpoint."
+        ),
+    )
+    parser.add_argument(
+        "--freeze-backbone-during-quantum",
+        action="store_true",
+        help=(
+            "Freeze the checkpoint-initialized deterministic physics bank, "
+            "image encoder, and orbit projection during quantum training. "
+            "Their evaluation-mode buffers are frozen as well."
+        ),
+    )
+    parser.add_argument(
+        "--allow-inconclusive-model-iv-audit",
+        action="store_true",
+        help=(
+            "Explicit research-only override for an inconclusive Model-IV "
+            "signal audit. Integrity failure and preprocessing signal loss "
+            "cannot be overridden, and the report remains inconclusive."
         ),
     )
     parser.add_argument("--image-size", type=int, default=defaults.image_size)
@@ -115,10 +156,54 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
     if config.stage == "pretrain" and config.backbone_checkpoint:
         raise ValueError("--backbone-checkpoint is not used by pretraining")
+    if config.stage == "audit" and config.backbone_checkpoint:
+        raise ValueError("--backbone-checkpoint is not used by the audit")
+
+    output_root = config.output_path
+    output_created = False
+    if config.dataset_id == "model_iv":
+        if output_root.exists():
+            raise FileExistsError(
+                "Refusing to overwrite an existing run directory: "
+                f"{output_root}"
+            )
+        output_root.mkdir(parents=True)
+        output_created = True
+        audit = run_model_iv_audit(config, output_root)
+        print(
+            f"MODEL_IV_AUDIT_STATUS {audit.status} "
+            f"report={audit.report_path}",
+            flush=True,
+        )
+        override = bool(
+            audit.status == INCONCLUSIVE_NO_SIGNAL_DETECTED
+            and config.allow_inconclusive_model_iv_audit
+            and config.stage != "audit"
+        )
+        if audit.status != PASS_SIGNAL_DETECTED and not override:
+            raise RuntimeError(
+                "Model-IV training gate did not pass; CUDA training was not "
+                f"started. See {audit.report_path}"
+            )
+        if override:
+            print(
+                "MODEL_IV_AUDIT_OVERRIDE research_only=true "
+                "status_remains_inconclusive=true",
+                flush=True,
+            )
+        if config.stage == "audit":
+            return
+
     if config.deterministic:
         os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+    # Keep the audit path independent of the training graph and TorchQuantum.
+    # This import is intentionally below the Model-IV gate.
+    from .engine import pretrain_spec, quantum_spec, train
+
     quantum_requested = config.stage in ("all", "quantum")
     if quantum_requested:
+        from .quantum import require_torchquantum, smoke_test_torchquantum
+
         require_torchquantum()
     if not torch.cuda.is_available():
         raise RuntimeError("Training requires a CUDA-capable GPU")
@@ -128,12 +213,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         print(f"QUANTUM_BACKEND {smoke_test_torchquantum(device)}", flush=True)
         torch.cuda.empty_cache()
 
-    output_root = config.output_path
-    if output_root.exists():
+    if output_root.exists() and not output_created:
         raise FileExistsError(
             f"Refusing to overwrite an existing run directory: {output_root}"
         )
-    output_root.mkdir(parents=True)
+    if not output_created:
+        output_root.mkdir(parents=True)
 
     backbone_checkpoint: Path | None = None
     if config.stage in ("all", "pretrain"):

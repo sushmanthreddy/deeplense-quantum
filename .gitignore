@@ -22,12 +22,16 @@
 !/src/d4_orqb/model.py
 !/src/d4_orqb/quantum.py
 
-# Canonical notebook implementation only.
+# Canonical dataset notebook implementations only.
 !/notebooks/
 /notebooks/*
 !/notebooks/d4_orqb/
 /notebooks/d4_orqb/*
 !/notebooks/d4_orqb/train_model_i.ipynb
+!/notebooks/d4_orqb/train_model_ii.ipynb
+!/notebooks/d4_orqb/train_model_iii.ipynb
+!/notebooks/d4_orqb/train_model_iv.ipynb
+!/notebooks/d4_orqb/train_model_v.ipynb
 
 # Static assets may be selected deliberately; generated run figures stay ignored.
 !/assets/
