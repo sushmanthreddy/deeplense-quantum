@@ -9,3 +9,4 @@
 *.gif binary
 *.pdf binary
 weights/** binary
+weights/**/*.md text diff merge eol=lf

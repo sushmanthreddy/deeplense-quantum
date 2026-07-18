@@ -63,6 +63,20 @@ runner.yaml
 *.pth
 *.ckpt
 *.safetensors
+
+# Explicitly selected, documented final checkpoints.
+!/weights/
+!/weights/README.md
+!/weights/model_1/
+!/weights/model_1/best.pt
+!/weights/model_2/
+!/weights/model_2/best.pt
+!/weights/model_3/
+!/weights/model_3/best.pt
+!/weights/model_4/
+!/weights/model_4/best.pt
+!/weights/model_5/
+!/weights/model_5/best.pt
 *.log
 *.tar
 *.tar.gz
