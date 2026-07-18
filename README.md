@@ -1,6 +1,6 @@
 # D4 Orbit-Reuploading Quantum Bottleneck
 
-This repository contains a clean, result-free implementation of the D4 Orbit-Reuploading Quantum Bottleneck (D4-ORQB) for three-class DeepLense Models I–V. The code is organized like the `main` branch: one small Python package under `src/` and one thin runnable notebook per dataset under `notebooks/`. The quantum stage runs through TorchQuantum's differentiable batched statevector device.
+This repository contains a clean, result-free implementation of the D4 Orbit-Reuploading Quantum Bottleneck (D4-ORQB) for three-class DeepLense Models I–V. The code is organized like the `main` branch: one small Python package under `src/` and one complete, standalone implementation notebook per dataset under `notebooks/`. The quantum stage runs through TorchQuantum's differentiable batched statevector device.
 
 No dataset, cache, generated figure, metric report, run manifest, or checkpoint is committed. Supply fresh paths at runtime and train on the GPU machine.
 
@@ -61,18 +61,23 @@ Training requires a CUDA-capable GPU. A local full training run is not expected 
 
 ## Dataset
 
-Keep dataset paths empty in committed code and notebooks. Models I–III and V use a development directory with this layout:
+Keep dataset paths empty in committed code and notebooks. Models I–III use separate development and official-test directories with the same class-folder layout:
 
 ```text
 <development-root>/
 ├── axion/*.npy
 ├── cdm/*.npy
 └── no_sub/*.npy
+
+<official-test-root>/
+├── axion/*.npy
+├── cdm/*.npy
+└── no_sub/*.npy
 ```
 
-Each `.npy` file must contain a two-dimensional lens image in a format accepted by the loader.
+Their notebooks carve a fixed, stratified 20% development-validation split from the development root. The official test root is not opened by training or checkpoint selection; its final evaluation requires the explicit notebook confirmation flag.
 
-Model IV uses its supplied split without carving another holdout:
+Model IV uses its supplied validation split and has no official test directory:
 
 ```text
 <model-iv-root>/
@@ -80,7 +85,13 @@ Model IV uses its supplied split without carving another holdout:
 └── val/{axion,cdm,no_sub}/*.npy
 ```
 
-Pass `train/` as the development root and `val/` as the validation root. The notebooks do not accept or inspect an official test path.
+Pass `train/` as the development root and `val/` as the validation root. Its notebook fixes a stratified 15% test holdout from `train/`, trains on the remaining 85%, and keeps all of supplied `val/` for development validation. The Model-IV signal audit receives a training-only symlink view, so the carved test samples are excluded from the audit as well as training and selection.
+
+Model V has one combined class-folder root and no supplied validation or test directory. Its notebook performs one fixed, stratified 65/20/15 train/validation/test split. Test is selected first and validation second from each class's original population; the partitions are persisted and checked for index and model-visible-content overlap.
+
+The carved Model-IV/V partitions are file-level because the supplied layouts expose no source/pair grouping manifest. If such provenance becomes available, replace the file-level carve with a source- or pair-grouped split before treating the holdout as benchmark evidence.
+
+Each `.npy` file must contain a two-dimensional lens image in a format accepted by the loader. The package CLI remains development-validation only; the supplied/carved test policies above are explicit notebook extensions for final reporting.
 
 ### Model IV preflight gate
 
@@ -114,7 +125,9 @@ The package default remains the documented 40-epoch Model-I workflow. The five d
 - [Model IV](notebooks/d4_orqb/train_model_iv.ipynb)
 - [Model V](notebooks/d4_orqb/train_model_v.ipynb)
 
-Each notebook leaves the development, optional Model-IV validation, cache, run, and results roots blank. It rejects reused run and result directories, invokes `--stage all --dataset-id ... --quantum-epochs 50` with explicit learning rates, and never opens an official test set. Model IV automatically runs the preflight gate first. The equivalent Model-I command starts as follows:
+Each notebook embeds the complete configuration, data pipeline, Model-IV audit, encoder, TorchQuantum circuit, classifier, metrics, checkpointing, symmetry checks, and training engine. It calls those definitions directly rather than launching the package CLI. Development, validation, test, cache, and output paths remain blank; reused output directories are rejected. Model IV automatically fixes its split and runs the training-only preflight gate before TorchQuantum or CUDA initialization.
+
+The equivalent package-level Model-I development-validation command starts as follows:
 
 ```bash
 export DEVELOPMENT_ROOT=""
@@ -132,22 +145,22 @@ PYTHONPATH=src python -m d4_orqb.main \
 
 Fill runtime paths only on the machine that owns the data and storage. The command refuses an empty required path and refuses to reuse an existing output directory. The `all` workflow owns the handoff from the pretraining checkpoint to the quantum stage; no committed weight file is required.
 
-After a successful run, the notebook validates and prints the generated checkpoint candidate at:
+After a successful notebook run, the validation-selected checkpoint candidate is:
 
 ```text
-<run-root>/<dataset-id>/<run-name>/quantum_seed2_50ep/best.pt
+<output-dir>/quantum_seed2_50ep/best.pt
 ```
 
 It does not copy that checkpoint into `weights/`. Review each completed run and its validation evidence first, then explicitly select and document any checkpoint that should be retained under `weights/`.
 
-The notebook automatically copies only the development-validation presentation artifacts into fresh paths shaped as:
+The quantum stage writes development-validation artifacts beside that checkpoint:
 
 ```text
-results/<dataset-id>/<run-name>/metrics.md
-results/<dataset-id>/<run-name>/roc_curve.png
+<output-dir>/quantum_seed2_50ep/validation_metrics.md
+<output-dir>/quantum_seed2_50ep/validation_roc_curve.png
 ```
 
-These metrics and curves are development-validation results, not official-test results.
+These are development-validation results, not test results. Final held-out evaluation is skipped by default. After choices are frozen, set `CONFIRM_FINAL_TEST_EVALUATION = True` and run the final cell once; it reloads `best.pt` and writes metrics, predictions, ROC, and confusion-matrix artifacts under `<output-dir>/final_test/`. After a kernel restart, set `FINAL_TEST_ONLY = True` as well to reopen the completed output and skip training. Models I–III label this as official test evaluation. Models IV–V label it as a carved development holdout, never as official test evidence.
 
 ## Future GPU runner
 
